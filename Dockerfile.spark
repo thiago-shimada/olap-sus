@@ -1,0 +1,17 @@
+FROM public.ecr.aws/bitnami/spark:latest
+
+USER root
+
+# Remove conflicting hadoop-aws 3.4.1 JAR that expects AWS SDK v2
+# Install curl and download all required JARs for offline operation
+RUN install_packages curl && \
+    rm -f /opt/bitnami/spark/jars/hadoop-aws-3.4.1.jar && \
+    curl -L -o /opt/bitnami/spark/jars/hadoop-aws-3.3.4.jar \
+    https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar && \
+    curl -L -o /opt/bitnami/spark/jars/aws-java-sdk-bundle-1.12.262.jar \
+    https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.262/aws-java-sdk-bundle-1.12.262.jar && \
+    curl -L -o /opt/bitnami/spark/jars/postgresql-42.7.3.jar \
+    https://repo1.maven.org/maven2/org/postgresql/postgresql/42.7.3/postgresql-42.7.3.jar && \
+    chmod 644 /opt/bitnami/spark/jars/*.jar
+
+USER 1001
