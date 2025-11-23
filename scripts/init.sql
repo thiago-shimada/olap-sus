@@ -128,3 +128,93 @@ BEGIN
 
 END;
 $$;
+
+CREATE TABLE IF NOT EXISTS dimMunicipio (
+    chave_municipio SERIAL PRIMARY KEY,
+    codigo_ibge INTEGER UNIQUE,
+    nome_municipio VARCHAR(100),
+    uf VARCHAR(2),
+    estado VARCHAR(50),
+    regiao VARCHAR(20)
+)
+
+CREATE TABLE IF NOT EXISTS dimOcupacao (
+    chave_ocupacao SERIAL PRIMARY KEY,
+    cbo_2002 VARCHAR(10) UNIQUE,
+    descricao TEXT,
+    familia VARCHAR(10),
+    descricao_familia TEXT,
+    subgrupo VARCHAR(10),
+    descricao_subgrupo TEXT,
+    subgrupo_principal VARCHAR(10),
+    descricao_subgrupo_principal TEXT,
+    grande_grupo VARCHAR(10),
+    descricao_grande_grupo TEXT,
+    indicador_cbo_2002_ativa INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS dimCausa (
+    chave_causa SERIAL PRIMARY KEY,
+    codigo_CID VARCHAR(10) NOT NULL UNIQUE,
+    subcategoria VARCHAR(10),
+    descricao_subcategoria VARCHAR(500),
+    categoria VARCHAR(10),
+    descricao_categoria VARCHAR(500),
+    capitulo VARCHAR(50),
+    descricao_capitulo VARCHAR(500),
+    causa_violencia BOOLEAN DEFAULT FALSE,
+    causa_overdose BOOLEAN DEFAULT FALSE
+);
+
+CREATE TABLE dim_demografia (
+    chave_demografia SERIAL PRIMARY KEY,
+
+    raca VARCHAR(50),
+
+    faixa_etaria VARCHAR(50),
+    idade_minima INT,
+    idade_maxima INT,
+
+    sexo CHAR(1),
+    descricao_sexo VARCHAR(20),
+
+    escolaridade VARCHAR(100),
+    nivel_escolaridade INT,
+
+    estado_civil VARCHAR(50)
+);
+
+CREATE TABLE dim_info_nascimento (
+    chave_info_nascimento SERIAL PRIMARY KEY,
+
+    sexo CHAR(1),
+    descricao_sexo VARCHAR(20),
+
+    raca_cor VARCHAR(50),
+
+    faixa_peso VARCHAR(50),
+    peso_min_gramas INT,
+    peso_max_gramas INT,
+
+    tipo_parto VARCHAR(50),
+
+    tempo_gestacao VARCHAR(50),
+    semanas_gestacao_min INT,
+    semanas_gestacao_max INT,
+
+    tipo_gravidez VARCHAR(50)
+);
+
+CREATE TABLE ponte_grupo_causas (
+    chave_grupo_causa INT NOT NULL, 
+    
+    chave_causa INT NOT NULL,
+    
+    ordem_causa INT NOT NULL,
+
+    PRIMARY KEY (chave_grupo_causa, chave_causa),
+
+    CONSTRAINT fk_ponte_grupo_causas
+        FOREIGN KEY (chave_causa)
+        REFERENCES dimCausa (chave_causa)
+);
