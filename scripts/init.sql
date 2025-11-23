@@ -166,7 +166,7 @@ CREATE TABLE IF NOT EXISTS dimCausa (
     causa_overdose BOOLEAN DEFAULT FALSE
 );
 
-CREATE TABLE dim_demografia (
+CREATE TABLE dimDemografia (
     chave_demografia SERIAL PRIMARY KEY,
 
     raca VARCHAR(50),
@@ -184,7 +184,7 @@ CREATE TABLE dim_demografia (
     estado_civil VARCHAR(50)
 );
 
-CREATE TABLE dim_info_nascimento (
+CREATE TABLE dimInfoNascimento (
     chave_info_nascimento SERIAL PRIMARY KEY,
 
     sexo CHAR(1),
@@ -205,7 +205,7 @@ CREATE TABLE dim_info_nascimento (
     tipo_gravidez VARCHAR(50)
 );
 
-CREATE TABLE ponte_grupo_causas (
+CREATE TABLE ponteGrupoCausas (
     chave_grupo_causa INT NOT NULL, 
     
     chave_causa INT NOT NULL,
