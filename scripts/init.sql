@@ -1,3 +1,5 @@
+CREATE EXTENSION IF NOT EXISTS tablefunc;
+
 DO $$
 DECLARE
     ano_inicio INTEGER := 2020;
