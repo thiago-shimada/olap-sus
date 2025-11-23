@@ -8,7 +8,7 @@
 # social.
 FIRST_ROLL_UP: str = """
 SELECT
-        d_ocp.familia AS 'familia_ocupacao,
+        d_ocp.familia AS 'familia_ocupacao',
         d_dem.escolaridade AS 'escolaridade',
         SUM(f_obt.quantidade_obitos) AS 'quantidade_obitos'
     FROM fctObitos f_obt
