@@ -102,6 +102,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres-db-volume:/var/lib/postgresql/data
+
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "airflow"]
       interval: 10s
@@ -119,6 +120,7 @@ services:
       - "5433:5432"
     volumes:
       - postgres-olap-db-volume:/var/lib/postgresql/data
+      - ./scripts/init.template.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "olap", "-d", "olap_db"]
       interval: 10s
