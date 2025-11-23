@@ -94,7 +94,6 @@ secrets/
 
 # Data files (if large)
 data/
-*.csv
 *.parquet
 *.json
 *.xml

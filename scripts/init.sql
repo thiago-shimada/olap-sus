@@ -135,8 +135,11 @@ CREATE TABLE IF NOT EXISTS dimMunicipio (
     nome_municipio VARCHAR(100),
     uf VARCHAR(2),
     estado VARCHAR(50),
-    regiao VARCHAR(20)
-)
+    regiao VARCHAR(20),
+    regiao_saude VARCHAR(300),
+    regiao_metropolitana VARCHAR(300),
+    is_capital BOOLEAN
+);
 
 CREATE TABLE IF NOT EXISTS dimOcupacao (
     chave_ocupacao SERIAL PRIMARY KEY,
@@ -218,3 +221,179 @@ CREATE TABLE ponteGrupoCausas (
         FOREIGN KEY (chave_causa)
         REFERENCES dimCausa (chave_causa)
 );
+
+-- ============================
+-- FUNÇÕES DE POPULAÇÃO
+-- ============================
+
+CREATE OR REPLACE FUNCTION popular_dim_municipio() RETURNS void AS $$
+BEGIN
+    CREATE TEMP TABLE IF NOT EXISTS stg_municipio (
+        id_municipio text,
+        id_municipio_6 text,
+        id_municipio_tse text,
+        id_municipio_rf text,
+        id_municipio_bcb text,
+        nome text,
+        capital_uf text,
+        id_comarca text,
+        id_regiao_saude text,
+        nome_regiao_saude text,
+        id_regiao_imediata text,
+        nome_regiao_imediata text,
+        id_regiao_intermediaria text,
+        nome_regiao_intermediaria text,
+        id_microrregiao text,
+        nome_microrregiao text,
+        id_mesorregiao text,
+        nome_mesorregiao text,
+        id_regiao_metropolitana text,
+        nome_regiao_metropolitana text,
+        ddd text,
+        id_uf text,
+        sigla_uf text,
+        nome_uf text,
+        nome_regiao text,
+        amazonia_legal text,
+        centroide text
+    );
+
+    TRUNCATE stg_municipio;
+
+    EXECUTE 'COPY stg_municipio FROM ''/data_files/br_bd_diretorios_brasil_municipio.csv'' WITH (FORMAT CSV, HEADER)';
+
+    INSERT INTO dimMunicipio (
+        codigo_ibge,
+        nome_municipio,
+        uf,
+        estado,
+        regiao,
+        regiao_saude,
+        regiao_metropolitana,
+        is_capital
+    )
+    SELECT
+        NULLIF(id_municipio, '')::integer,
+        nome,
+        sigla_uf,
+        nome_uf,
+        nome_regiao,
+        nome_regiao_saude,
+        nome_regiao_metropolitana,
+        CASE WHEN capital_uf = '1' THEN TRUE ELSE FALSE END
+    FROM stg_municipio
+    WHERE id_municipio IS NOT NULL AND id_municipio != ''
+    ON CONFLICT (codigo_ibge) DO NOTHING;
+
+    DROP TABLE stg_municipio;
+    
+    RAISE NOTICE 'Tabela dimMunicipio populada com sucesso.';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION popular_dim_ocupacao() RETURNS void AS $$
+BEGIN
+    CREATE TEMP TABLE IF NOT EXISTS stg_ocupacao (
+        cbo_2002 text,
+        descricao text,
+        familia text,
+        descricao_familia text,
+        subgrupo text,
+        descricao_subgrupo text,
+        subgrupo_principal text,
+        descricao_subgrupo_principal text,
+        grande_grupo text,
+        descricao_grande_grupo text,
+        indicador_cbo_2002_ativa text
+    );
+
+    TRUNCATE stg_ocupacao;
+
+    EXECUTE 'COPY stg_ocupacao FROM ''/data_files/br_bd_diretorios_brasil_cbo_2002.csv'' WITH (FORMAT CSV, HEADER)';
+
+    INSERT INTO dimOcupacao (
+        cbo_2002,
+        descricao,
+        familia,
+        descricao_familia,
+        subgrupo,
+        descricao_subgrupo,
+        subgrupo_principal,
+        descricao_subgrupo_principal,
+        grande_grupo,
+        descricao_grande_grupo,
+        indicador_cbo_2002_ativa
+    )
+    SELECT
+        TRIM(cbo_2002),
+        TRIM(descricao),
+        TRIM(familia),
+        TRIM(descricao_familia),
+        TRIM(subgrupo),
+        TRIM(descricao_subgrupo),
+        TRIM(subgrupo_principal),
+        TRIM(descricao_subgrupo_principal),
+        TRIM(grande_grupo),
+        TRIM(descricao_grande_grupo),
+        CASE WHEN TRIM(indicador_cbo_2002_ativa) = '1' THEN 1 ELSE 0 END
+    FROM stg_ocupacao
+    ON CONFLICT (cbo_2002) DO NOTHING;
+
+    DROP TABLE stg_ocupacao;
+
+    RAISE NOTICE 'Tabela dimOcupacao populada com sucesso.';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION popular_dim_causa() RETURNS void AS $$
+BEGIN
+    CREATE TEMP TABLE IF NOT EXISTS stg_causa (
+        subcategoria text,
+        descricao_subcategoria text,
+        categoria text,
+        descricao_categoria text,
+        capitulo text,
+        descricao_capitulo text,
+        causa_violencia text,
+        causa_overdose text,
+        cid_datasus text
+    );
+
+    TRUNCATE stg_causa;
+
+    EXECUTE 'COPY stg_causa FROM ''/data_files/br_bd_diretorios_brasil_cid_10.csv'' WITH (FORMAT CSV, HEADER)';
+
+    INSERT INTO dimCausa (
+        codigo_CID,
+        subcategoria,
+        descricao_subcategoria,
+        categoria,
+        descricao_categoria,
+        capitulo,
+        descricao_capitulo,
+        causa_violencia,
+        causa_overdose
+    )
+    SELECT
+        subcategoria,
+        subcategoria,
+        descricao_subcategoria,
+        categoria,
+        descricao_categoria,
+        capitulo,
+        descricao_capitulo,
+        CASE WHEN causa_violencia = '1' THEN TRUE ELSE FALSE END,
+        CASE WHEN causa_overdose = '1' THEN TRUE ELSE FALSE END
+    FROM stg_causa
+    ON CONFLICT (codigo_CID) DO NOTHING;
+
+    DROP TABLE stg_causa;
+
+    RAISE NOTICE 'Tabela dimCausa populada com sucesso.';
+END;
+$$ LANGUAGE plpgsql;
+
+-- Executa as funções de população
+SELECT popular_dim_municipio();
+SELECT popular_dim_ocupacao();
+SELECT popular_dim_causa();
