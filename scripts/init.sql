@@ -228,6 +228,8 @@ CREATE TABLE ponteGrupoCausas (
 
 CREATE OR REPLACE FUNCTION popular_dim_municipio() RETURNS void AS $$
 BEGIN
+    -- Cria tabela temporária para carga
+    -- A estrutura deve corresponder exatamente às colunas do CSV
     CREATE TEMP TABLE IF NOT EXISTS stg_municipio (
         id_municipio text,
         id_municipio_6 text,
@@ -258,10 +260,14 @@ BEGIN
         centroide text
     );
 
+    -- Limpa tabela temporária
     TRUNCATE stg_municipio;
 
+    -- Copia dados do CSV
+    -- O arquivo br_bd_diretorios_brasil_municipio.csv já contém as informações de UF e Região
     EXECUTE 'COPY stg_municipio FROM ''/data_files/br_bd_diretorios_brasil_municipio.csv'' WITH (FORMAT CSV, HEADER)';
 
+    -- Insere na tabela dimensão
     INSERT INTO dimMunicipio (
         codigo_ibge,
         nome_municipio,
@@ -285,6 +291,7 @@ BEGIN
     WHERE id_municipio IS NOT NULL AND id_municipio != ''
     ON CONFLICT (codigo_ibge) DO NOTHING;
 
+    -- Remove tabela temporária
     DROP TABLE stg_municipio;
     
     RAISE NOTICE 'Tabela dimMunicipio populada com sucesso.';
@@ -393,7 +400,145 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION popular_dim_demografia() RETURNS void AS $$
+BEGIN
+    INSERT INTO dimDemografia (
+        raca,
+        escolaridade,
+        nivel_escolaridade,
+        estado_civil,
+        sexo,
+        descricao_sexo,
+        faixa_etaria,
+        idade_minima,
+        idade_maxima
+    )
+    SELECT
+        r.raca,
+        e.escolaridade,
+        e.nivel,
+        ec.estado_civil,
+        s.sexo,
+        s.descricao,
+        f.faixa,
+        f.min_idade,
+        f.max_idade
+    FROM
+        (VALUES 
+            ('Branca'), ('Preta'), ('Amarela'), ('Parda'), ('Indígena')
+        ) AS r(raca)
+    CROSS JOIN
+        (VALUES 
+            ('Nenhuma', 0), 
+            ('1 a 3 anos', 1), 
+            ('4 a 7 anos', 2), 
+            ('8 a 11 anos', 3), 
+            ('12 e mais', 4), 
+            ('Ignorado', 9)
+        ) AS e(escolaridade, nivel)
+    CROSS JOIN
+        (VALUES 
+            ('Solteiro'), 
+            ('Casado'), 
+            ('Viúvo'), 
+            ('Separado judicialmente/divorciado'), 
+            ('União estável'), 
+            ('Ignorado')
+        ) AS ec(estado_civil)
+    CROSS JOIN
+        (VALUES 
+            ('M', 'Masculino'), 
+            ('F', 'Feminino'), 
+            ('I', 'Ignorado')
+        ) AS s(sexo, descricao)
+    CROSS JOIN
+        (
+            SELECT '0 a 5 anos' AS faixa, 0 AS min_idade, 5 AS max_idade
+            UNION ALL
+            SELECT 
+                n::text || ' a ' || (n+4)::text || ' anos',
+                n,
+                n+4
+            FROM generate_series(6, 96, 5) AS n
+            UNION ALL
+            SELECT 'Mais de 100 anos', 101, NULL
+        ) AS f(faixa, min_idade, max_idade);
+
+    RAISE NOTICE 'Tabela dimDemografia populada com sucesso.';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION popular_dim_info_nascimento() RETURNS void AS $$
+BEGIN
+    INSERT INTO dimInfoNascimento (
+        sexo,
+        descricao_sexo,
+        raca_cor,
+        faixa_peso,
+        peso_min_gramas,
+        peso_max_gramas,
+        tipo_parto,
+        tempo_gestacao,
+        semanas_gestacao_min,
+        semanas_gestacao_max,
+        tipo_gravidez
+    )
+    SELECT
+        s.sexo,
+        s.descricao,
+        r.raca,
+        p.faixa,
+        p.min_peso,
+        p.max_peso,
+        tp.tipo,
+        tg.faixa,
+        tg.min_sem,
+        tg.max_sem,
+        tgr.tipo
+    FROM
+        (VALUES 
+            ('M', 'Masculino'), 
+            ('F', 'Feminino'), 
+            ('I', 'Ignorado')
+        ) AS s(sexo, descricao)
+    CROSS JOIN
+        (VALUES 
+            ('Branca'), ('Preta'), ('Amarela'), ('Parda'), ('Indígena')
+        ) AS r(raca)
+    CROSS JOIN
+        (VALUES 
+            ('Extremo Baixo Peso', 0, 999),
+            ('Muito Baixo Peso', 1000, 1499),
+            ('Baixo Peso', 1500, 2499),
+            ('Normal', 2500, 3999),
+            ('Macrossômico', 4000, NULL)
+        ) AS p(faixa, min_peso, max_peso)
+    CROSS JOIN
+        (VALUES 
+            ('Vaginal'), ('Cesário'), ('Ignorado')
+        ) AS tp(tipo)
+    CROSS JOIN
+        (VALUES 
+            ('Menos de 22 semanas', 0, 21),
+            ('22 a 27 semanas', 22, 27),
+            ('28 a 31 semanas', 28, 31),
+            ('32 a 36 semanas', 32, 36),
+            ('37 a 41 semanas', 37, 41),
+            ('42 semanas e mais', 42, NULL),
+            ('Ignorado', NULL, NULL)
+        ) AS tg(faixa, min_sem, max_sem)
+    CROSS JOIN
+        (VALUES 
+            ('Única'), ('Dupla'), ('Tripla ou mais'), ('Ignorado')
+        ) AS tgr(tipo);
+
+    RAISE NOTICE 'Tabela dimInfoNascimento populada com sucesso.';
+END;
+$$ LANGUAGE plpgsql;
+
 -- Executa as funções de população
 SELECT popular_dim_municipio();
 SELECT popular_dim_ocupacao();
 SELECT popular_dim_causa();
+SELECT popular_dim_demografia();
+SELECT popular_dim_info_nascimento();
