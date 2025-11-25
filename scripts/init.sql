@@ -29,7 +29,7 @@ BEGIN
 
     CREATE TABLE IF NOT EXISTS dimHorario (
         chave_tempo   SERIAL PRIMARY KEY,
-        tempo         TIME NOT NULL,
+        tempo         TIME,
         hora          INTEGER,
         minutos       INTEGER,
         segundos      INTEGER,
@@ -102,6 +102,9 @@ BEGIN
     -- ============================
     -- POPULAÇÃO DA DIMHORARIO
     -- ============================
+
+    INSERT INTO dimHorario (chave_tempo, tempo, hora, minutos, segundos, periodo)
+    VALUES (-1, NULL, NULL, NULL, NULL, 'Ignorado');
 
     INSERT INTO dimHorario (
         tempo,

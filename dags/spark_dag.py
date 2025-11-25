@@ -27,6 +27,17 @@ S3A_CONF = {
     'spark.hadoop.fs.s3a.aws.credentials.provider': 'org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider',
     # Ensure JARs are distributed to executors
     'spark.jars.ivy': '/tmp/.ivy2',
+    # Memory optimization settings
+    'spark.driver.memory': '2g',
+    'spark.executor.memory': '2g',
+    'spark.driver.maxResultSize': '1g',
+    'spark.sql.shuffle.partitions': '50',
+    'spark.default.parallelism': '4',
+    'spark.sql.adaptive.enabled': 'true',
+    'spark.sql.adaptive.coalescePartitions.enabled': 'true',
+    'spark.memory.fraction': '0.6',
+    'spark.memory.storageFraction': '0.2',
+    'spark.sql.autoBroadcastJoinThreshold': '10485760',
 }
 
 
@@ -42,7 +53,7 @@ dag = DAG(
 for dataset in ['sih', 'sinasc', 'sim']:
     SparkSubmitOperator(
         task_id=f'ingest_{dataset}',
-        application='/opt/airflow/dags/spark_script.py',
+        application=f'/opt/airflow/dags/spark_script_{dataset}.py',
         conn_id='spark_conn',
         name=f'sus-ingest-{dataset}',
         # Use jars instead of packages to avoid Maven downloads
@@ -52,7 +63,7 @@ for dataset in ['sih', 'sinasc', 'sim']:
         dag=dag,
         application_args=[
             '--dataset', dataset,
-            '--date', '{{ ds if ds is defined else "2025-11-16" }}',
+            '--date', '{{ ds }}',
             '--bucket', 'landing',
             '--prefix', 'source_sus',
             '--pg-url', 'jdbc:postgresql://postgres-olap:5432/olap_db',

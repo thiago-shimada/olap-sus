@@ -184,12 +184,13 @@ services:
     environment:
       - SPARK_MODE=worker
       - SPARK_MASTER_URL=spark://spark-master:7077
-      - SPARK_WORKER_MEMORY=2g
+      - SPARK_WORKER_MEMORY=4g
       - SPARK_WORKER_CORES=4
       - SPARK_RPC_AUTHENTICATION_ENABLED=no
       - SPARK_RPC_ENCRYPTION_ENABLED=no
       - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
       - SPARK_SSL_ENABLED=no
+      - SPARK_DAEMON_MEMORY=512m
     volumes:
       - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/spark/jobs
     depends_on:
