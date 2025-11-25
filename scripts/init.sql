@@ -2,7 +2,7 @@ CREATE EXTENSION IF NOT EXISTS tablefunc;
 
 DO $$
 DECLARE
-    ano_inicio INTEGER := 2020;
+    ano_inicio INTEGER := 1900;
     ano_fim    INTEGER := 2030;
 
 BEGIN
@@ -215,11 +215,47 @@ CREATE TABLE ponteGrupoCausas (
     
     ordem_causa INT NOT NULL,
 
-    PRIMARY KEY (chave_grupo_causa, chave_causa),
+    PRIMARY KEY (chave_grupo_causa, ordem_causa),
 
     CONSTRAINT fk_ponte_grupo_causas
         FOREIGN KEY (chave_causa)
         REFERENCES dimCausa (chave_causa)
+);
+
+CREATE TABLE factNascimentos (
+    chave_data INT REFERENCES dimData(chave_data),
+    chave_tempo INT REFERENCES dimHorario(chave_tempo),
+    chave_municipio_nascimento INT REFERENCES dimMunicipio(chave_municipio),
+    chave_municipio_residencia INT REFERENCES dimMunicipio(chave_municipio),
+    chave_demografia INT REFERENCES dimDemografia(chave_demografia),
+    chave_info_nascimento INT REFERENCES dimInfoNascimento(chave_info_nascimento),
+    quantidade_nascimentos INT DEFAULT 1,
+    PRIMARY KEY (chave_data, chave_tempo, chave_municipio_nascimento, chave_municipio_residencia, chave_demografia, chave_info_nascimento)
+);
+
+CREATE TABLE factObitos (
+    chave_data_nascimento INT REFERENCES dimData(chave_data),
+    chave_data_obito INT REFERENCES dimData(chave_data),
+    chave_tempo_obito INT REFERENCES dimHorario(chave_tempo),
+    chave_municipio_residencia INT REFERENCES dimMunicipio(chave_municipio),
+    chave_municipio_obito INT REFERENCES dimMunicipio(chave_municipio),
+    chave_demografia INT REFERENCES dimDemografia(chave_demografia),
+    chave_grupo_causa INT, -- Relaciona com ponteGrupoCausas
+    chave_ocupacao INT REFERENCES dimOcupacao(chave_ocupacao),
+    quantidade_obitos INT DEFAULT 1,
+    PRIMARY KEY (chave_data_nascimento, chave_data_obito, chave_tempo_obito, chave_municipio_residencia, chave_municipio_obito, chave_demografia, chave_grupo_causa, chave_ocupacao)
+);
+
+CREATE TABLE factInternacoes (
+    chave_data_entrada INT REFERENCES dimData(chave_data),
+    chave_data_saida INT REFERENCES dimData(chave_data),
+    chave_municipio INT REFERENCES dimMunicipio(chave_municipio),
+    chave_causa_primaria INT REFERENCES dimCausa(chave_causa),
+    chave_causa_secundaria INT REFERENCES dimCausa(chave_causa),
+    chave_ocupacao INT REFERENCES dimOcupacao(chave_ocupacao),
+    valor NUMERIC(15, 2),
+    quantidade_procedimentos INT,
+    PRIMARY KEY (chave_data_entrada, chave_data_saida, chave_municipio, chave_causa_primaria, chave_causa_secundaria, chave_ocupacao)
 );
 
 -- ============================
@@ -535,6 +571,27 @@ BEGIN
     RAISE NOTICE 'Tabela dimInfoNascimento populada com sucesso.';
 END;
 $$ LANGUAGE plpgsql;
+
+-- ============================
+-- INSERÇÃO DE REGISTROS "IGNORADO" (ID 0)
+-- ============================
+
+INSERT INTO dimMunicipio (chave_municipio, codigo_ibge, nome_municipio, uf, estado, regiao, is_capital)
+VALUES (0, 0, 'Ignorado', 'IG', 'Ignorado', 'Ignorado', FALSE)
+ON CONFLICT (codigo_ibge) DO NOTHING;
+
+INSERT INTO dimOcupacao (chave_ocupacao, cbo_2002, descricao)
+VALUES (0, '000000', 'Ignorado')
+ON CONFLICT (cbo_2002) DO NOTHING;
+
+INSERT INTO dimCausa (chave_causa, codigo_CID, descricao_subcategoria)
+VALUES (0, '0000', 'Causa Ignorada')
+ON CONFLICT (codigo_CID) DO NOTHING;
+
+-- Grupo de Causa 0 -> Causa 0
+INSERT INTO ponteGrupoCausas (chave_grupo_causa, chave_causa, ordem_causa)
+VALUES (0, 0, 1)
+ON CONFLICT (chave_grupo_causa, ordem_causa) DO NOTHING;
 
 -- Executa as funções de população
 SELECT popular_dim_municipio();
