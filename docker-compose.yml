@@ -129,6 +129,20 @@ services:
       start_period: 5s
     restart: always
 
+  dashboard:
+    build: ./dashboard
+    depends_on:
+      - postgres-olap
+    environment:
+      - DB_HOST=postgres-olap
+      - DB_PORT=5432
+      - DB_NAME=olap_db
+      - DB_USER=olap
+      - DB_PASSWORD=olap
+    ports:
+      - "8050:8050"
+    restart: always
+
   minio:
     image: minio/minio
     ports:
