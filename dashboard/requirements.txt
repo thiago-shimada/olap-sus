@@ -2,5 +2,4 @@ dash==2.10.0
 pandas==2.2.2
 psycopg2-binary==2.9.11
 plotly==5.16.0
-gunicorn==20.1.0
 SQLAlchemy==2.0.19

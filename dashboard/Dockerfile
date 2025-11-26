@@ -16,5 +16,3 @@ COPY . /app
 
 ENV PORT=8050
 EXPOSE 8050
-
-CMD ["gunicorn", "app:server", "-b", "0.0.0.0:8050", "-w", "4", "--timeout", "120"]

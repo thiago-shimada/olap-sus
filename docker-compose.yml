@@ -131,6 +131,9 @@ services:
 
   dashboard:
     build: ./dashboard
+    command: python app.py
+    volumes:
+      - ./dashboard:/app
     depends_on:
       - postgres-olap
     environment:
