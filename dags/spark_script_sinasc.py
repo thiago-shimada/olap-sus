@@ -7,7 +7,7 @@ from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
 # ==========================================
-# UTILITÁRIOS (Reaproveitados do padrão)
+# UTILITÁRIOS
 # ==========================================
 
 def _list_paths_with_glob(spark: SparkSession, glob_path: str) -> List[str]:
@@ -111,7 +111,7 @@ def transform_sinasc_raw(df):
 
     # Sexo do RN
     df = df.withColumn("sexo_rn_desc", 
-        F.when(F.col("SEXO") == "1", "Masculino")
+        F.when(F.col("SEXO") == "1", "M")
         .when(F.col("SEXO") == "M", "M")
         .when(F.col("SEXO") == "1", "M")
         .when(F.col("SEXO") == "F", "F")
@@ -276,7 +276,10 @@ def main():
             (df_joined.raca_mae_desc == dim_demografia.raca) &
             (df_joined.estciv_mae_desc == dim_demografia.estado_civil) &
             (df_joined.esc_mae_desc == dim_demografia.escolaridade) &
-            (df_joined.idade_mae >= dim_demografia.idade_minima) &
+            (
+                (df_joined.idade_mae.isNotNull() & (df_joined.idade_mae >= dim_demografia.idade_minima)) |
+                (df_joined.idade_mae.isNull() & dim_demografia.idade_minima.isNull())
+            ) &
             (
                  dim_demografia.idade_maxima.isNull() | 
                 (df_joined.idade_mae <= dim_demografia.idade_maxima)
@@ -292,7 +295,10 @@ def main():
             (df_joined.parto_desc == dim_info_nasc.tipo_parto) &
             (df_joined.gestacao_desc == dim_info_nasc.tempo_gestacao) &
             (df_joined.gravidez_desc == dim_info_nasc.tipo_gravidez) &
-            (df_joined.peso_gramas >= dim_info_nasc.peso_min_gramas) &
+            (
+                (df_joined.peso_gramas.isNotNull() & (df_joined.peso_gramas >= dim_info_nasc.peso_min_gramas)) |
+                (df_joined.peso_gramas.isNull() & dim_info_nasc.peso_min_gramas.isNull())
+            ) &
             (
                 dim_info_nasc.peso_max_gramas.isNull() |
                 (df_joined.peso_gramas <= dim_info_nasc.peso_max_gramas)

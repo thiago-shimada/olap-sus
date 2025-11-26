@@ -464,7 +464,7 @@ BEGIN
         f.max_idade
     FROM
         (VALUES 
-            ('Branca'), ('Preta'), ('Amarela'), ('Parda'), ('Indígena')
+            ('Branca'), ('Preta'), ('Amarela'), ('Parda'), ('Indígena'), ('Ignorado')
         ) AS r(raca)
     CROSS JOIN
         (VALUES 
@@ -501,6 +501,8 @@ BEGIN
             FROM generate_series(6, 96, 5) AS n
             UNION ALL
             SELECT 'Mais de 100 anos', 101, NULL
+            UNION ALL
+            SELECT 'Ignorado', NULL, NULL
         ) AS f(faixa, min_idade, max_idade);
 
     RAISE NOTICE 'Tabela dimDemografia populada com sucesso.';
@@ -542,7 +544,7 @@ BEGIN
         ) AS s(sexo, descricao)
     CROSS JOIN
         (VALUES 
-            ('Branca'), ('Preta'), ('Amarela'), ('Parda'), ('Indígena')
+            ('Branca'), ('Preta'), ('Amarela'), ('Parda'), ('Indígena'), ('Ignorado')
         ) AS r(raca)
     CROSS JOIN
         (VALUES 
@@ -550,7 +552,8 @@ BEGIN
             ('Muito Baixo Peso', 1000, 1499),
             ('Baixo Peso', 1500, 2499),
             ('Normal', 2500, 3999),
-            ('Macrossômico', 4000, NULL)
+            ('Macrossômico', 4000, NULL),
+            ('Ignorado', NULL, NULL)
         ) AS p(faixa, min_peso, max_peso)
     CROSS JOIN
         (VALUES 
