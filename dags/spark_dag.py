@@ -50,7 +50,8 @@ dag = DAG(
 )
 
 # Create one ingestion task per dataset
-for dataset in ['sih', 'sinasc', 'sim']:
+# for dataset in ['sih', 'sinasc', 'sim']:
+for dataset in ['sinasc', 'sim']:
     SparkSubmitOperator(
         task_id=f'ingest_{dataset}',
         application=f'/opt/airflow/dags/spark_script_{dataset}.py',

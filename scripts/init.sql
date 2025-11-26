@@ -596,6 +596,58 @@ INSERT INTO ponteGrupoCausas (chave_grupo_causa, chave_causa, ordem_causa)
 VALUES (0, 0, 1)
 ON CONFLICT (chave_grupo_causa, ordem_causa) DO NOTHING;
 
+INSERT INTO dimDemografia (
+    chave_demografia,
+    raca,
+    faixa_etaria,
+    idade_minima,
+    idade_maxima,
+    sexo,
+    descricao_sexo,
+    escolaridade,
+    nivel_escolaridade,
+    estado_civil
+) VALUES (
+    0,
+    'Ignorado',
+    'Ignorado',
+    0,
+    0,
+    'I',
+    'Ignorado',
+    'Ignorado',
+    0,
+    'Ignorado'
+) ON CONFLICT (chave_demografia) DO NOTHING;
+
+INSERT INTO dimInfoNascimento (
+    chave_info_nascimento,
+    sexo,
+    descricao_sexo,
+    raca_cor,
+    faixa_peso,
+    peso_min_gramas,
+    peso_max_gramas,
+    tipo_parto,
+    tempo_gestacao,
+    semanas_gestacao_min,
+    semanas_gestacao_max,
+    tipo_gravidez
+) VALUES (
+    0,
+    'I',
+    'Ignorado',
+    'Ignorado',
+    'Ignorado',
+    0,
+    0,
+    'Ignorado',
+    'Ignorado',
+    0,
+    0,
+    'Ignorado'
+) ON CONFLICT (chave_info_nascimento) DO NOTHING;
+
 -- Executa as funções de população
 SELECT popular_dim_municipio();
 SELECT popular_dim_ocupacao();
