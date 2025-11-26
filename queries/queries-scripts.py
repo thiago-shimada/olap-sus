@@ -40,29 +40,29 @@ SELECT
 """
 
 # Slice and dice
-# Custo de internações na cidade de São Carlos entre os anos de 2017 a 2022.
+# Custo de internações na cidade de ${city} entre os anos de ${start_year} a ${end_year}.
 # É realizada uma operação de slice para filtrar apenas as internações na cidade
-# de São Carlos, e em seguida um dice para restringir o período entre 2017 e 2022.
-# Essa consulta fornece uma visão direcionada do custo hospitalar em São Carlos,
-# e no período de interesse que contempla os anos de 2017 a 2022.
+# de ${city}, e em seguida um dice para restringir o período entre ${start_year} a ${end_year}.
+# Essa consulta fornece uma visão direcionada do custo hospitalar em ${city},
+# e no período de interesse que contempla os anos de ${start_year} a ${end_year}.
 # É uma avaliação útil porque o intervalo inclui tanto anos afetados diretamente
 # pela pandemia da COVID-19 quanto anos anteriores, permitindo comparar o
 # impacto orçamentário entre diferentes contextos.
-SLICE_AND_DICE: str = """
+def SLICE_AND_DICE(city: str, start_year: int, end_year: int) -> str: f"""
 SELECT
     SUM(f_int.valor_ato_profissional) AS 'custo'
     JOIN (
             SELECT
                     chave_dataPK,
                 FROM dimData
-                WHERE ano BETWEEN 2017 AND 2022
+                WHERE ano BETWEEN {start_year} AND {end_year}
         ) AS d_dat
         ON d_dat.chave_dataPK = f_int.chave_dataFK
     JOIN (
             SELECT
                 chave_municipioPK,
             FROM dimMunicipio
-            WHERE municipio = 'São Carlos'
+            WHERE municipio = {city}
         ) AS d_mun
         ON d_mun.chave_municipioPK = f_int.chave_municipioFK
 """
