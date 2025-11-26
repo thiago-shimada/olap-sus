@@ -8,15 +8,15 @@
 # social.
 FIRST_ROLL_UP: str = """
 SELECT
-        d_ocp.familia AS 'familia_ocupacao',
-        d_dem.escolaridade AS 'escolaridade',
-        SUM(f_obt.quantidade_obitos) AS 'quantidade_obitos'
-    FROM fctObitos f_obt
-    JOIN dimOcupacao d_ocp
-        ON d_ocp.chave_ocupacaoPK = f_obt.chave_ocupacaoFK
-    JOIN dimDemografia d_dem
-        ON d_dem.chave_demografiaPK = f_obt.chave_demografiaFK
-    GROUP BY d_ocp.familia, d_dem.escolaridade
+        d_ocp.descricao_familia as "familia",
+        d_dem.escolaridade as "escolaridade",
+        SUM(f_obt.quantidade_obitos)
+    FROM factobitos f_obt
+    JOIN dimocupacao d_ocp
+        ON d_ocp.chave_ocupacao = f_obt.chave_ocupacao  
+    JOIN dimdemografia d_dem
+        ON d_dem.chave_demografia  = f_obt.chave_demografia
+    GROUP BY d_ocp.descricao_familia, d_dem.escolaridade;
 """
 
 # 2ª roll-up/drill-down
@@ -28,15 +28,15 @@ SELECT
 # públicas voltadas à saúde materna e de educação sexual e permanência escolar.
 SECOND_ROLL_UP: str = """
 SELECT
-        d_mun.estado AS 'estado',
-        d_mae.faixa_etaria AS 'faixa_etaria_mae',
-        SUM(f_nas.quantidade_nascimentos) AS 'quantidade_nascimentos'
-    FROM fctNascimentos f_nas
+        d_mun.estado AS "estado",
+        d_mae.faixa_etaria AS "faixa_etaria_mae",
+        SUM(f_nas.quantidade_nascimentos) AS "quantidade_nascimentos"
+    FROM factNascimentos f_nas
     JOIN dimMunicipio d_mun
-        ON d_mun.chave_municipioPK = f_nas.chave_municioFK
-    JOIN dimDemografiaMae d_mae
-        ON d_mae.chave_demografia_maePK = f_nas.chave_demografia_maeFK
-    GROUP BY d_mun.estado, d_mae.faixa_etaria
+        ON d_mun.chave_municipio = f_nas.chave_municipio_nascimento 
+    JOIN dimDemografia d_mae
+        ON d_mae.chave_demografia = f_nas.chave_demografia
+    GROUP BY d_mun.estado, d_mae.faixa_etaria;
 """
 
 # Slice and dice
@@ -50,21 +50,22 @@ SELECT
 # impacto orçamentário entre diferentes contextos.
 def SLICE_AND_DICE(city: str, start_year: int, end_year: int) -> str: f"""
 SELECT
-    SUM(f_int.valor_ato_profissional) AS 'custo'
+    SUM(f_int.quantidade_obitos ) AS "óbitos"
+    FROM factobitos f_int  
     JOIN (
-            SELECT
-                    chave_dataPK,
-                FROM dimData
-                WHERE ano BETWEEN {start_year} AND {end_year}
-        ) AS d_dat
-        ON d_dat.chave_dataPK = f_int.chave_dataFK
+        SELECT
+        	chave_data
+        FROM dimData
+        WHERE ano BETWEEN {start_year} AND {end_year}
+    ) AS d_dat
+    ON d_dat.chave_data = f_int.chave_data_obito
     JOIN (
-            SELECT
-                chave_municipioPK,
-            FROM dimMunicipio
-            WHERE municipio = {city}
-        ) AS d_mun
-        ON d_mun.chave_municipioPK = f_int.chave_municipioFK
+        SELECT
+            chave_municipio
+        FROM dimMunicipio dm
+        WHERE dm.nome_municipio = '{city}'
+    ) AS d_mun
+    ON d_mun.chave_municipio = f_int.chave_municipio_obito ;
 """
 
 # Pivot
@@ -75,21 +76,32 @@ SELECT
 PIVOT: str ="""
     SELECT * FROM CROSSTAB('
         SELECT
-                d_dat.ano AS ano,
-                d_mun.estado as estado,
-                SUM(f_int.quantidade_internacoes) as quantidade_internacoes
-            FROM fctInternacoes f_int
+                d_dat.ano as "ANO",
+                d_mun.uf as "ESTADO",
+                SUM(f_int.quantidade_obitos) as quantidade_obitos
+            FROM factobitos f_int
             JOIN dimData d_dat
-                ON d_dat.chave_dataPK = f_int.chave_dataFK
-            JOIN dimMunicipios d_mun
-                ON d_mun.chave_municipioPK = f_int.chave_municipioFK
-            GROUP BY d_dat.ano, d_mun.estado
+                ON d_dat.chave_data = f_int.chave_data_obito
+            JOIN dimMunicipio d_mun
+                ON d_mun.chave_municipio = f_int.chave_municipio_obito
+            GROUP BY d_dat.ano, d_mun.uf
+			ORDER BY d_dat.ano, d_mun.uf
     ',
     '
-        SELECT
-                d_mun.estado
-            FROM dimMunicipio
+        SELECT DISTINCT uf
+        FROM dimMunicipio
+        ORDER BY uf
     ')
+AS ct (
+    "ANO" INTEGER,
+    "AC" BIGINT, "AL" BIGINT, "AP" BIGINT, "AM" BIGINT,
+    "BA" BIGINT, "CE" BIGINT, "DF" BIGINT, "ES" BIGINT,
+    "GO" BIGINT, "MA" BIGINT, "MT" BIGINT, "MS" BIGINT,
+    "MG" BIGINT, "PA" BIGINT, "PB" BIGINT, "PR" BIGINT,
+    "PE" BIGINT, "PI" BIGINT, "RJ" BIGINT, "RN" BIGINT,
+    "RS" BIGINT, "RO" BIGINT, "RR" BIGINT, "SC" BIGINT,
+    "SP" BIGINT, "SE" BIGINT, "TO" BIGINT, "IG" BIGINT
+);
 """
 
 # Drill-across
@@ -100,33 +112,33 @@ PIVOT: str ="""
 # infraestrutura
 DRILL_ACROSS: str = """
 SELECT
-        nasc.ano AS 'ano',
-        nasc.municipio AS 'municipio',
-        nasc.quantidade_nascimentos AS 'quantidade_nascimentos',
-        obit.quantidade_obitos AS 'quantidade_obitos
+        nasc.ano AS "ano",
+        nasc.municipio AS "municipio",
+        nasc.quantidade_nascimentos AS "quantidade_nascimentos",
+        obit.quantidade_obitos AS "quantidade_obitos"
     FROM (
             SELECT
                     d_dat.ano AS ano,
-                    d_mun.municipio AS municipio,
+                    d_mun.nome_municipio AS municipio,
                     SUM(f_nas.quantidade_nascimentos) AS quantidade_nascimentos
-                FROM fctNascimentos f_nas
+                FROM factNascimentos f_nas
                 JOIN dimData d_dat
-                    ON d_dat.chave_dataPK = f_nas.chave_dataFK
+                    ON d_dat.chave_data = f_nas.chave_data 
                 JOIN dimMunicipio d_mun
-                    ON d_mun.chave_municipioPK = f_nas.chave_municipioFK
-                GROUP BY d_dat.ano, d_mun.municipio
+                    ON d_mun.chave_municipio = f_nas.chave_municipio_nascimento 
+                GROUP BY d_dat.ano, d_mun.nome_municipio 
         ) AS nasc
     JOIN (
             SELECT
                     d_dat.ano AS ano,
-                    d_mun.municipio AS municipio,
+                    d_mun.nome_municipio AS municipio,
                     SUM(f_obt.quantidade_obitos) AS quantidade_obitos
-                FROM fctObitos f_obt
+                FROM factObitos f_obt
                 JOIN dimData d_dat
-                    ON d_dat.chave_dataPK = f_obt.chave_dataFK
+                    ON d_dat.chave_data = f_obt.chave_data_obito
                 JOIN dimMunicipio d_mun
-                    ON d_mun.chave_municipioPK = f_obt.chave_municipioFK
-                GROUP BY d_dat.ano, d_mun.municipio
+                    ON d_mun.chave_municipio = f_obt.chave_municipio_obito 
+                GROUP BY d_dat.ano, d_mun.nome_municipio
         ) AS obit
-        ON nasc.ano = obit.ano AND nasc.municipio = obit.municipio
+    ON nasc.ano = obit.ano AND nasc.municipio = obit.municipio;
 """
