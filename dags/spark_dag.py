@@ -27,17 +27,20 @@ S3A_CONF = {
     'spark.hadoop.fs.s3a.aws.credentials.provider': 'org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider',
     # Ensure JARs are distributed to executors
     'spark.jars.ivy': '/tmp/.ivy2',
-    # Memory optimization settings
-    'spark.driver.memory': '2g',
-    'spark.executor.memory': '2g',
-    'spark.driver.maxResultSize': '1g',
-    'spark.sql.shuffle.partitions': '50',
-    'spark.default.parallelism': '4',
+    # Memory optimization settings - Configuração agressiva para evitar OOM
+    'spark.driver.memory': '5g',
+    'spark.executor.memory': '5g',
+    'spark.driver.maxResultSize': '2g',
+    'spark.executor.memoryOverhead': '1g',  # Overhead extra para operações off-heap
+    'spark.sql.shuffle.partitions': '20',  # Reduzido para menos fragmentação
+    'spark.default.parallelism': '2',  # Reduzido para economizar memória
     'spark.sql.adaptive.enabled': 'true',
     'spark.sql.adaptive.coalescePartitions.enabled': 'true',
-    'spark.memory.fraction': '0.6',
-    'spark.memory.storageFraction': '0.2',
-    'spark.sql.autoBroadcastJoinThreshold': '10485760',
+    'spark.memory.fraction': '0.8',  # Aumentado de 0.6 para usar mais memória
+    'spark.memory.storageFraction': '0.1',  # Reduzido de 0.2 - priorizar execution
+    'spark.sql.autoBroadcastJoinThreshold': '-1',  # DESABILITAR broadcast joins
+    'spark.sql.files.maxPartitionBytes': '67108864',  # 64MB por partição (reduzido)
+    'spark.executor.cores': '2',  # Reduzir cores para ter mais memória por tarefa
 }
 
 

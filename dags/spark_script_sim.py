@@ -231,11 +231,11 @@ def process_bridge_table(df_sim, df_dim_causa, jdbc_opts, spark):
 
     # 4. Ler Grupos Existentes e Criar suas Assinaturas
     # Se a tabela estiver vazia, cria DF vazio
-    # Otimização: usar count() ao invés de isEmpty() que é mais eficiente
-    bridge_count = df_bridge_db.count()
-    print(f"Grupos de causas existentes no banco: {bridge_count}")
+    # Otimização: verificar via first() ao invés de count() para evitar OOM
+    first_row = df_bridge_db.first()
+    print(f"Verificando grupos de causas existentes no banco...")
     
-    if bridge_count == 0:
+    if first_row is None:
         df_existing_signatures = spark.createDataFrame([], schema=StructType([
             StructField("existing_group_id", IntegerType()), 
             StructField("group_signature", StringType())
@@ -280,8 +280,9 @@ def process_bridge_table(df_sim, df_dim_causa, jdbc_opts, spark):
             F.col("cause_struct.ordem_causa").cast("int").alias("ordem_causa")
         )
 
-        print(f"Inserindo {df_new_groups_ids.count()} novos grupos de causas na ponte.")
+        print(f"Inserindo novos grupos de causas na ponte...")
         df_to_insert.write.format("jdbc").options(**jdbc_opts).option("dbtable", "ponteGrupoCausas").mode("append").save()
+        print("Inserção concluída")
 
         # Atualizar o mapeamento local para incluir os novos
         df_mapping_final = df_merged.join(
@@ -363,12 +364,11 @@ def main():
         print(f"Processando arquivo {file_idx}/{len(files)}: {file_path}")
         print(f"{'='*60}\n")
         
-        # 3.1. Ler arquivo individual
         df_raw = spark.read.option("header", "true").option("sep", ";").option("inferSchema", "false").csv(file_path)
-        record_count = df_raw.count()
-        print(f"Registros no arquivo: {record_count}")
+        print(f"Lendo arquivo...")
         
-        if record_count == 0:
+        # Verificar se está vazio sem usar count()
+        if df_raw.first() is None:
             print(f"Arquivo vazio, pulando...")
             continue
         
@@ -416,16 +416,7 @@ def main():
         df_joined = df_joined.join(dim_mun_res, on="cod_mun_res", how="left")
         df_joined = df_joined.join(dim_mun_ocor, on="cod_mun_ocor", how="left")
         
-        # Debug: verificar quantos municípios não fizeram match
-        total_records = df_joined.count()
-        null_mun_res = df_joined.filter(F.col("chave_municipio_residencia").isNull() & F.col("cod_mun_res").isNotNull()).count()
-        null_mun_ocor = df_joined.filter(F.col("chave_municipio_obito").isNull() & F.col("cod_mun_ocor").isNotNull()).count()
-        empty_mun_ocor = df_joined.filter(F.col("cod_mun_ocor").isNull()).count()
-        
-        print(f"Total de registros: {total_records}")
-        print(f"Municípios de residência não encontrados: {null_mun_res}")
-        print(f"Municípios de ocorrência não encontrados: {null_mun_ocor}")
-        print(f"Registros com código de município de ocorrência vazio/null: {empty_mun_ocor}")
+        print("Joins com municípios completados")
 
         # Ocupação
         df_joined = df_joined.join(
@@ -478,24 +469,36 @@ def main():
         # Ocupação e grupo de causa: sempre preencher com 0 se null
         df_joined = df_joined.fillna(0, subset=["chave_ocupacao", "chave_grupo_causa"])
         
-        # Reparticionar antes da agregação
-        df_joined = df_joined.repartition(4, *keys)
+        # Reparticionar antes da agregação (reduzido para 2 partições para economizar memória)
+        df_joined = df_joined.repartition(2, *keys)
         
         df_agg = df_joined.groupBy(*keys).count().withColumnRenamed("count", "quantidade_obitos")
         
         # Filtra nulos restantes para evitar crash do job
         df_agg = df_agg.na.drop(subset=keys)
         
-        # 3.5. Escrita na Fato (append)
-        agg_count = df_agg.count()
-        print(f"\nEscrevendo {agg_count} registros agregados na factObitos...")
+        print(f"\nEscrevendo registros agregados na factObitos...")
         df_agg.write.format("jdbc").options(**jdbc_opts).option("dbtable", "factObitos").mode("append").save()
         
         print(f"✓ Arquivo {file_idx}/{len(files)} processado com sucesso!\n")
         
-        # Liberar memória
+        # Liberar memória explicitamente
         df_raw.unpersist()
         df_clean.unpersist()
+        df_joined.unpersist()
+        df_agg.unpersist()
+        
+        # Forçar garbage collection
+        import gc
+        gc.collect()
+    
+    # Limpar cache das dimensões
+    dim_data.unpersist()
+    dim_municipio.unpersist()
+    dim_horario.unpersist()
+    dim_demografia.unpersist()
+    dim_ocupacao.unpersist()
+    dim_causa.unpersist()
     
     print("\n" + "="*60)
     print("PROCESSAMENTO CONCLUÍDO COM SUCESSO!")
