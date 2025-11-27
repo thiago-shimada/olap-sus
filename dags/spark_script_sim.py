@@ -52,8 +52,8 @@ def transform_sim_raw(df):
     
     # Sexo
     df = df.withColumn("sexo_desc", 
-        F.when((F.col("SEXO") == "1" | F.col("SEXO") == "M"), "Masculino")
-         .when((F.col("SEXO") == "2" | F.col("SEXO") == "F"), "Feminino")
+        F.when(((F.col("SEXO") == "1") | (F.col("SEXO") == "M")), "Masculino")
+         .when(((F.col("SEXO") == "2") | (F.col("SEXO") == "F")), "Feminino")
          .otherwise("Ignorado")
     )
     
@@ -401,7 +401,7 @@ def main():
         print(f"\nEscrevendo registros agregados na factObitos...")
         df_agg.write.format("jdbc").options(**jdbc_opts).option("dbtable", "factObitos").mode("append").save()
         
-        print(f"✓ Arquivo {file_idx}/{len(files)} processado com sucesso!\n")
+        print(f"Arquivo {file_idx}/{len(files)} processado com sucesso!\n")
         
         df_raw.unpersist()
         df_clean.unpersist()
