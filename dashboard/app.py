@@ -4,6 +4,7 @@ from sqlalchemy import create_engine, text
 from urllib.parse import quote_plus
 from dash import Dash, dcc, html, Input, Output, State
 import plotly.express as px
+import plotly.graph_objects as go
 
 
 # DB connection from environment
@@ -30,44 +31,68 @@ def run_query(q, params=None):
         df = pd.read_sql(text(q), conn, params=params)
         return df
 
+## Queries
 
-# Corrected and parameterized queries based on your schema
-FIRST_ROLL_UP: str = """
-SELECT
-        d_ocp.descricao_familia as "familia",
-        d_dem.escolaridade as "escolaridade",
-        SUM(f_obt.quantidade_obitos) as "quantidade_obitos"
-    FROM factobitos f_obt
-    JOIN dimocupacao d_ocp
-        ON d_ocp.chave_ocupacao = f_obt.chave_ocupacao
-    JOIN dimdemografia d_dem
-        ON d_dem.chave_demografia  = f_obt.chave_demografia
-    GROUP BY d_ocp.descricao_familia, d_dem.escolaridade;
+GET_OCUPACAO_FAMILIAS = """
+SELECT DISTINCT descricao_familia
+FROM dimOcupacao
+WHERE descricao_familia IS NOT NULL
+ORDER BY descricao_familia;
 """
 
 
+TOP_10_CAUSES_BY_OCUPACAO = """ 
+WITH ClassificacaoCausas AS (
+    SELECT 
+        d2.descricao_familia, 
+        d.descricao_subcategoria, 
+        SUM(f.quantidade_obitos) as total_obitos,
+        ROW_NUMBER() OVER(
+            PARTITION BY d2.descricao_familia 
+            ORDER BY SUM(f.quantidade_obitos) DESC
+        ) as ranking
+    FROM factobitos f
+    JOIN pontegrupocausas p ON p.chave_grupo_causa = f.chave_grupo_causa 
+    JOIN dimcausa d ON d.chave_causa = p.chave_causa
+    JOIN dimocupacao d2 ON d2.chave_ocupacao = f.chave_ocupacao 
+    WHERE d2.descricao_familia = :selected_familia and p.ordem_causa = 1 and d.codigo_cid != '0000'
+    GROUP BY 1, 2
+)
+SELECT 
+    descricao_familia,
+    descricao_subcategoria,
+    total_obitos
+FROM ClassificacaoCausas
+WHERE ranking <= 10
+ORDER BY descricao_familia, total_obitos DESC;
+"""
 
-SECOND_ROLL_UP: str = """
+
+SECOND_ROLL_UP = """
 SELECT
-        d_mun.estado AS "estado",
-        d_mae.faixa_etaria AS "faixa_etaria_mae",
-        SUM(f_nas.quantidade_nascimentos) AS "quantidade_nascimentos"
-    FROM factNascimentos f_nas
-    JOIN dimMunicipio d_mun
-        ON d_mun.chave_municipio = f_nas.chave_municipio_nascimento
-    JOIN dimDemografia d_mae
-        ON d_mae.chave_demografia = f_nas.chave_demografia
-    GROUP BY d_mun.estado, d_mae.faixa_etaria;
+    d_mun.estado AS estado,
+    d_dem.faixa_etaria AS faixa_etaria_mae,
+    SUM(f.quantidade_nascimentos) AS quantidade_nascimentos
+FROM factNascimentos f
+LEFT JOIN dimMunicipio d_mun ON d_mun.chave_municipio = f.chave_municipio_nascimento
+LEFT JOIN dimDemografia d_dem ON d_dem.chave_demografia = f.chave_demografia
+GROUP BY d_mun.estado, d_dem.faixa_etaria
+ORDER BY d_mun.estado, d_dem.faixa_etaria;
 """
 
 
 SLICE_AND_DICE: str = """
 SELECT
+    d_dat.mes,
+    d_dat.ano,
     SUM(f_int.quantidade_obitos ) AS "obitos"
     FROM factobitos f_int
     JOIN (
         SELECT
-        	chave_data
+          ano,
+          mes,
+          numero_mes,
+          chave_data
         FROM dimData
         WHERE ano BETWEEN :start_year AND :end_year
     ) AS d_dat
@@ -78,7 +103,9 @@ SELECT
         FROM dimMunicipio dm
         WHERE dm.nome_municipio = :city
     ) AS d_mun
-    ON d_mun.chave_municipio = f_int.chave_municipio_obito ;
+    ON d_mun.chave_municipio = f_int.chave_municipio_obito
+    GROUP BY 1, 2, d_dat.numero_mes 
+    ORDER BY 2, d_dat.numero_mes;
 """
 
 
@@ -150,14 +177,21 @@ SELECT
 	ORDER BY municipio, ano ;
 """
 
+
 app.layout = html.Div([
-    html.H2('OLAP Dashboard - Nascimentos / Óbitos / Internações'),
+    html.H2('OLAP Dashboard - Nascimentos / Óbitos'),
 
     dcc.Tabs([
-        dcc.Tab(label='1) Óbitos por família ocupação × escolaridade', children=[
-            html.Button('Atualizar', id='btn-first-roll', n_clicks=0),
-            dcc.Graph(id='first-roll-graph'),
-            dcc.Store(id='first-roll-data')
+        dcc.Tab(label='1) Top 10 Causas de Morte por Família de Ocupação', children=[
+            html.Div([
+                html.Label('Selecione a Família de Ocupação:'),
+                dcc.Dropdown(
+                    id='ocupacao-familia-dropdown',
+                    options=[],
+                    value=None,
+                    placeholder='Selecione uma família de ocupação'),
+            ], style={'width': '50%', 'margin-bottom': '20px'}),
+            dcc.Graph(id='top-causes-pie-chart')
         ]),
 
         dcc.Tab(label='2) Nascimentos por estado × faixa etária (mãe)', children=[
@@ -175,7 +209,7 @@ app.layout = html.Div([
                 dcc.Input(id='slice-end', value=2023, type='number'),
                 html.Button('Executar', id='btn-slice', n_clicks=0)
             ], style={'display':'flex', 'gap':'10px', 'align-items':'center'}),
-            html.Div(id='slice-result')
+            dcc.Graph(id='slice-result')
         ]),
 
         dcc.Tab(label='4) Pivot - Óbitos por estado por ano', children=[
@@ -186,9 +220,10 @@ app.layout = html.Div([
         dcc.Tab(label='5) Drill-across - Nascimentos x Óbitos por cidade/ano', children=[
             html.Button('Atualizar Drill', id='btn-drill', n_clicks=0),
             dcc.Graph(id='drill-graph')
-        ])
+        ]),
     ])
 ])
+
 
 # Callbacks
 @app.callback(Output('first-roll-graph', 'figure'), Input('btn-first-roll', 'n_clicks'))
@@ -197,7 +232,7 @@ def update_first_roll(n):
     if df.empty:
         fig = px.bar(title='Sem dados')
         return fig
-    fig = px.bar(df, x='familia', y='quantidade_obitos', color='escolaridade', barmode='group', title='Óbitos por família de ocupação e escolaridade')
+    fig = px.bar(df, x='familia_ocupacao', y='quantidade_obitos', color='escolaridade', barmode='group', title='Óbitos por família de ocupação e escolaridade')
     return fig
 
 
@@ -209,14 +244,19 @@ def update_second_roll(n):
     fig = px.bar(df, x='estado', y='quantidade_nascimentos', color='faixa_etaria_mae', barmode='group', title='Nascimentos por estado e faixa etária da mãe')
     return fig
 
-@app.callback(Output('slice-result', 'children'), Input('btn-slice', 'n_clicks'), State('slice-city', 'value'), State('slice-start', 'value'), State('slice-end', 'value'))
+@app.callback(Output('slice-result', 'figure'), Input('btn-slice', 'n_clicks'), State('slice-city', 'value'), State('slice-start', 'value'), State('slice-end', 'value'))
 def run_slice(n, city, start, end):
     if not city:
-        return html.Div('Digite o nome da cidade (campo nome_municipio).')
+        return px.line(title='Digite o nome da cidade (campo nome_municipio).')
     params = {'city': city, 'start_year': int(start), 'end_year': int(end)}
     df = run_query(SLICE_AND_DICE, params=params)
-    obitos = df['obitos'].iloc[0] if not df.empty else 0
-    return html.Div(f'Obitos em {city} entre {start} e {end}: {obitos}')
+    
+    # Criar coluna temporária juntando mês e ano
+    if not df.empty:
+        df['mes_ano'] = df['mes'].astype(str).str.zfill(2) + '/' + df['ano'].astype(str)
+    
+    fig = px.line(df, x='mes_ano', y='obitos', title=f'Óbitos em {city} entre {start} e {end}', markers=True)
+    return fig
 
 
 @app.callback(Output('pivot-heatmap', 'figure'), Input('btn-pivot', 'n_clicks'))
@@ -225,7 +265,7 @@ def update_pivot(n):
     if df.empty:
         return px.imshow([[0]], labels=dict(x='estado', y='ano'), title='Sem dados')
     df = df.set_index('ANO')
-    fig = px.imshow(df.values, x=df.columns, y=df.index, aspect='auto', labels=dict(x='Estado', y='Ano', color='Óbitos'), title='Quantidade de internações por Estado por Ano')
+    fig = px.imshow(df.values, x=df.columns, y=df.index, aspect='auto', labels=dict(x='Estado', y='Ano', color='Óbitos'), title='Quantidade de Óbitos por Estado por Ano')
     return fig
 
 @app.callback(Output('drill-graph', 'figure'), Input('btn-drill', 'n_clicks'))
@@ -237,6 +277,31 @@ def update_drill(n):
     df['crescimento_natural'] = df['quantidade_nascimentos'] - df['quantidade_obitos']
     # aggregated by municipio: let user inspect via scatter (x=ano, y=crescimento)
     fig = px.bar(df, x='municipio', y='crescimento_natural', color='ano', title='Crescimento natural (Nascimentos - Óbitos) por Município e Ano')
+    return fig
+
+
+@app.callback(Output('ocupacao-familia-dropdown', 'options'), Output('ocupacao-familia-dropdown', 'value'), Input('ocupacao-familia-dropdown', 'id'))
+def update_dropdown_options(dropdown_id):
+    df = run_query(GET_OCUPACAO_FAMILIAS)
+    if df.empty:
+        return [], None
+    options = [{'label': familia, 'value': familia} for familia in df['descricao_familia'].tolist()]
+    first_value = df['descricao_familia'].iloc[0] if not df.empty else None
+    return options, first_value
+
+
+@app.callback(Output('top-causes-pie-chart', 'figure'), Input('ocupacao-familia-dropdown', 'value'))
+def update_top_causes_chart(selected_familia):
+    if not selected_familia:
+        return px.pie(title='Selecione uma família de ocupação')
+    
+    params = {'selected_familia': selected_familia}
+    df = run_query(TOP_10_CAUSES_BY_OCUPACAO, params=params)
+    
+    if df.empty:
+        return px.pie(title=f'Sem dados para {selected_familia}')
+    fig = go.Figure(data=[go.Pie(labels=df['descricao_subcategoria'], values=df['total_obitos'], hole=.5)])
+    #fig = px.pie(df, values='total_obitos', names='descricao_subcategoria', title=f'Top 10 Causas de Morte - Família: {selected_familia}')
     return fig
 
 if __name__ == '__main__':
