@@ -1,5 +1,5 @@
-dash==2.10.0
+dash==3.3.0
 pandas==2.2.2
 psycopg2-binary==2.9.11
-plotly==5.16.0
-SQLAlchemy==2.0.19
+plotly==6.5.0
+SQLAlchemy==2.0.44
