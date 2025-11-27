@@ -225,7 +225,7 @@ def update_pivot(n):
     if df.empty:
         return px.imshow([[0]], labels=dict(x='estado', y='ano'), title='Sem dados')
     df = df.set_index('ANO')
-    fig = px.imshow(df.values, x=df.columns, y=df.index, aspect='auto', labels=dict(x='Estado', y='Ano'), title='Quantidade de internações por Estado por Ano')
+    fig = px.imshow(df.values, x=df.columns, y=df.index, aspect='auto', labels=dict(x='Estado', y='Ano', color='Óbitos'), title='Quantidade de internações por Estado por Ano')
     return fig
 
 @app.callback(Output('drill-graph', 'figure'), Input('btn-drill', 'n_clicks'))
