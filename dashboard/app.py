@@ -130,6 +130,7 @@ SELECT
                     ON d_dat.chave_data = f_nas.chave_data
                 JOIN dimMunicipio d_mun
                     ON d_mun.chave_municipio = f_nas.chave_municipio_nascimento
+                WHERE d_mun.regiao_saude in ('Coração do DRS III', 'Central do DRS III', 'Rio Claro')
                 GROUP BY d_dat.ano, d_mun.nome_municipio
         ) AS nasc
     JOIN (
