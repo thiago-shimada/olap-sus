@@ -1,0 +1,6 @@
+pyspark
+pytest
+pytest-cov
+pandas
+sqlalchemy
+psycopg2-binary

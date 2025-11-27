@@ -114,8 +114,8 @@ DRILL_ACROSS: str = """
 SELECT
         nasc.ano AS "ano",
         nasc.municipio AS "municipio",
-        nasc.quantidade_nascimentos AS "quantidade_nascimentos",
-        obit.quantidade_obitos AS "quantidade_obitos"
+        COALESCE(nasc.quantidade_nascimentos,0) AS "quantidade_nascimentos",
+        COALESCE(obit.quantidade_obitos,0) AS "quantidade_obitos"
     FROM (
             SELECT
                     d_dat.ano AS ano,
@@ -123,10 +123,11 @@ SELECT
                     SUM(f_nas.quantidade_nascimentos) AS quantidade_nascimentos
                 FROM factNascimentos f_nas
                 JOIN dimData d_dat
-                    ON d_dat.chave_data = f_nas.chave_data 
+                    ON d_dat.chave_data = f_nas.chave_data
                 JOIN dimMunicipio d_mun
-                    ON d_mun.chave_municipio = f_nas.chave_municipio_nascimento 
-                GROUP BY d_dat.ano, d_mun.nome_municipio 
+                    ON d_mun.chave_municipio = f_nas.chave_municipio_nascimento
+                WHERE d_mun.regiao_saude in ('Coração do DRS III', 'Central do DRS III', 'Rio Claro')
+                GROUP BY d_dat.ano, d_mun.nome_municipio
         ) AS nasc
     JOIN (
             SELECT
@@ -137,8 +138,10 @@ SELECT
                 JOIN dimData d_dat
                     ON d_dat.chave_data = f_obt.chave_data_obito
                 JOIN dimMunicipio d_mun
-                    ON d_mun.chave_municipio = f_obt.chave_municipio_obito 
+                    ON d_mun.chave_municipio = f_obt.chave_municipio_obito
+                WHERE d_mun.regiao_saude in ('Coração do DRS III', 'Central do DRS III', 'Rio Claro')
                 GROUP BY d_dat.ano, d_mun.nome_municipio
         ) AS obit
-    ON nasc.ano = obit.ano AND nasc.municipio = obit.municipio;
+    ON nasc.ano = obit.ano AND nasc.municipio = obit.municipio
+	ORDER BY municipio, ano ;
 """
