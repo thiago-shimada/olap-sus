@@ -657,3 +657,37 @@ SELECT popular_dim_ocupacao();
 SELECT popular_dim_causa();
 SELECT popular_dim_demografia();
 SELECT popular_dim_info_nascimento();
+
+-- Indices
+
+CREATE INDEX idx_fact_obitos_ocupacao ON factObitos(chave_ocupacao);
+
+CREATE INDEX idx_fact_obitos_grupocausa ON factObitos(chave_grupo_causa);
+
+CREATE INDEX idx_fact_obitos_data_obito ON factObitos(chave_data_obito);
+
+CREATE INDEX idx_fact_obitos_municipio_obito ON factObitos(chave_municipio_obito);
+
+CREATE INDEX idx_fact_nasc_municipio_nasc ON factNascimentos(chave_municipio_nascimento);
+
+CREATE INDEX idx_fact_nasc_demografia ON factNascimentos(chave_demografia);
+
+CREATE INDEX idx_fact_nasc_data ON factNascimentos(chave_data);
+
+CREATE INDEX idx_ponte_grupo_composto ON ponteGrupoCausas(chave_grupo_causa, ordem_causa);
+
+CREATE INDEX idx_ponte_causa ON ponteGrupoCausas(chave_causa);
+
+CREATE INDEX idx_dim_ocupacao_familia ON dimOcupacao(descricao_familia);
+
+CREATE INDEX idx_dim_data_ano ON dimData(ano);
+
+CREATE INDEX idx_dim_municipio_nome ON dimMunicipio(nome_municipio);
+
+CREATE INDEX idx_dim_municipio_estado ON dimMunicipio(estado);
+
+CREATE INDEX idx_dim_municipio_uf ON dimMunicipio(uf);
+
+CREATE INDEX idx_dim_municipio_regiao_saude ON dimMunicipio(regiao_saude);
+
+CREATE INDEX idx_dim_demografia_faixa_etaria ON dimDemografia(faixa_etaria);

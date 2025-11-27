@@ -74,8 +74,8 @@ SELECT
     d_dem.faixa_etaria AS faixa_etaria_mae,
     SUM(f.quantidade_nascimentos) AS quantidade_nascimentos
 FROM factNascimentos f
-LEFT JOIN dimMunicipio d_mun ON d_mun.chave_municipio = f.chave_municipio_nascimento
-LEFT JOIN dimDemografia d_dem ON d_dem.chave_demografia = f.chave_demografia
+JOIN dimMunicipio d_mun ON d_mun.chave_municipio = f.chave_municipio_nascimento
+JOIN dimDemografia d_dem ON d_dem.chave_demografia = f.chave_demografia
 GROUP BY d_mun.estado, d_dem.faixa_etaria
 ORDER BY d_mun.estado, d_dem.faixa_etaria;
 """
@@ -132,7 +132,7 @@ AS ct (
     "ANO" INTEGER,
     "AC" BIGINT, "AL" BIGINT, "AP" BIGINT, "AM" BIGINT,
     "BA" BIGINT, "CE" BIGINT, "DF" BIGINT, "ES" BIGINT,
-    "IG" BIGINT, "GO" BIGINT, "MA" BIGINT, "MT" BIGINT, 
+    "GO" BIGINT, "IG" BIGINT, "MA" BIGINT, "MT" BIGINT, 
     "MS" BIGINT, "MG" BIGINT, "PA" BIGINT, "PB" BIGINT, 
     "PR" BIGINT, "PE" BIGINT, "PI" BIGINT, "RJ" BIGINT,
     "RN" BIGINT, "RS" BIGINT, "RO" BIGINT, "RR" BIGINT, 
