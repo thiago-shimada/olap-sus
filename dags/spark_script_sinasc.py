@@ -6,11 +6,8 @@ from typing import List
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
-# ==========================================
-# UTILITÁRIOS
-# ==========================================
-
 def _list_paths_with_glob(spark: SparkSession, glob_path: str) -> List[str]:
+    """Gera uma lista de caminhos dos arquivos a serem processados"""
     try:
         jvm = spark._jvm
         sc = spark.sparkContext
@@ -27,26 +24,19 @@ def get_jdbc_df(spark, table, opts):
     """Lê uma tabela do Postgres como DataFrame Spark."""
     return spark.read.format("jdbc").options(**opts).option("dbtable", table).load()
 
-# ==========================================
-# TRANSFORMAÇÃO E LIMPEZA - SINASC
-# ==========================================
-
 def transform_sinasc_raw(df):
     """
-    Limpeza e tipagem dos dados do SINASC (Nascimentos).
-    Mapeia códigos para descrições compatíveis com as dimensões do init.sql.
+    Limpeza e enriquecimento dos dados do SINASC.
     """
     # 1. Datas
-    # Formato SINASC geralmente é DDMMAAAA
     df = df.withColumn("data_nascimento", F.to_date(F.col("DTNASC").cast("string"), "ddMMyyyy"))
 
-    # 2. Hora (HH:MM) -> Converter para HH:MM:SS
-    # SINASC as vezes vem com 4 digitos (HHMM).
+    # 2. Hora (HH:MM:SS) - Transformar horarios inválidos em 00:00:00
     df = df.withColumn("hora_clean", F.lpad(F.col("HORANASC").cast("string"), 4, "0"))
     df = df.withColumn("tempo_nascimento", 
         F.when(
             (F.col("hora_clean").isNull()) | (F.col("hora_clean") == "") | (F.col("hora_clean") > "2359"), 
-            F.lit("00:00:00") # Default para ignorado
+            F.lit("00:00:00")
         ).otherwise(
             F.concat(
                 F.substring(F.col("hora_clean"), 1, 2), F.lit(":"),
@@ -65,15 +55,10 @@ def transform_sinasc_raw(df):
          .otherwise(F.substring(F.col("CODMUNRES").cast("string"), 1, 6).cast("int"))
     )
 
-    # ==========================================
-    # MAPEAMENTOS PARA DIMENSÃO DEMOGRAFIA (MÃE)
-    # ==========================================
-
     # Idade da Mãe (Numérico)
     df = df.withColumn("idade_mae", F.col("IDADEMAE").cast("int"))
 
-    # Raça Mãe (Campo RACACORMAE no layout novo ou RACACOR se antigo, assumindo layout > 2010 base pdf)
-    # 1-Branca, 2-Preta, 3-Amarela, 4-Parda, 5-Indígena
+    # Raça Mãe
     df = df.withColumn("raca_mae_desc", 
         F.when(F.col("RACACORMAE") == "1", "Branca")
          .when(F.col("RACACORMAE") == "2", "Preta")
@@ -83,8 +68,7 @@ def transform_sinasc_raw(df):
          .otherwise("Ignorado")
     )
 
-    # Escolaridade Mãe (ESCMAE - Escala 1 a 5 conforme init.sql)
-    # 1: Nenhuma, 2: 1 a 3 anos, 3: 4 a 7 anos, 4: 8 a 11 anos, 5: 12 e mais
+    # Escolaridade Mãe
     df = df.withColumn("esc_mae_desc",
         F.when(F.col("ESCMAE") == "1", "Nenhuma")
          .when(F.col("ESCMAE") == "2", "1 a 3 anos")
@@ -95,9 +79,8 @@ def transform_sinasc_raw(df):
     )
 
     # Estado Civil Mãe
-    # 1- Solteira, 2- Casada, 3-Viúva, 4-Separada, 5-União estável
     df = df.withColumn("estciv_mae_desc",
-        F.when(F.col("ESTCIVMAE") == "1", "Solteiro") # init.sql usa masculino no termo
+        F.when(F.col("ESTCIVMAE") == "1", "Solteiro")
          .when(F.col("ESTCIVMAE") == "2", "Casado")
          .when(F.col("ESTCIVMAE") == "3", "Viúvo")
          .when(F.col("ESTCIVMAE") == "4", "Separado judicialmente/divorciado")
@@ -105,21 +88,14 @@ def transform_sinasc_raw(df):
          .otherwise("Ignorado")
     )
 
-    # ==========================================
-    # MAPEAMENTOS PARA DIMENSÃO INFO NASCIMENTO (BEBÊ/PARTO)
-    # ==========================================
-
     # Sexo do RN
     df = df.withColumn("sexo_rn_desc", 
         F.when(F.col("SEXO") == "1", "M")
-        .when(F.col("SEXO") == "M", "M")
-        .when(F.col("SEXO") == "1", "M")
-        .when(F.col("SEXO") == "F", "F")
         .when(F.col("SEXO") == "2", "F")
         .otherwise("I")
     )
 
-    # Raça do RN (Item 19)
+    # Raça do RN
     df = df.withColumn("raca_rn_desc", 
         F.when(F.col("RACACOR") == "1", "Branca")
          .when(F.col("RACACOR") == "2", "Preta")
@@ -132,16 +108,14 @@ def transform_sinasc_raw(df):
     # Peso (Gramas)
     df = df.withColumn("peso_gramas", F.col("PESO").cast("int"))
 
-    # Tipo de Parto (Item 13)
-    # 1-Vaginal, 2-Cesário
+    # Tipo de Parto
     df = df.withColumn("parto_desc",
         F.when(F.col("PARTO") == "1", "Vaginal")
          .when(F.col("PARTO") == "2", "Cesário")
          .otherwise("Ignorado")
     )
 
-    # Semanas de Gestação (Item 11)
-    # 1: <22, 2: 22-27, 3: 28-31, 4: 32-36, 5: 37-41, 6: >42
+    # Semanas de Gestação
     df = df.withColumn("gestacao_desc",
         F.when(F.col("GESTACAO") == "1", "Menos de 22 semanas")
          .when(F.col("GESTACAO") == "2", "22 a 27 semanas")
@@ -152,8 +126,7 @@ def transform_sinasc_raw(df):
          .otherwise("Ignorado")
     )
 
-    # Tipo de Gravidez (Item 12)
-    # 1- Única, 2-Dupla, 3- Tripla ou mais
+    # Tipo de Gravidez
     df = df.withColumn("gravidez_desc",
         F.when(F.col("GRAVIDEZ") == "1", "Única")
          .when(F.col("GRAVIDEZ") == "2", "Dupla")
@@ -162,10 +135,6 @@ def transform_sinasc_raw(df):
     )
 
     return df
-
-# ==========================================
-# MAIN
-# ==========================================
 
 def main():
     p = argparse.ArgumentParser()
@@ -181,11 +150,11 @@ def main():
 
     spark = SparkSession.builder.appName("ETL_SINASC_FactNascimentos").getOrCreate()
 
-    # 1. Listar arquivos
+    # 1. Listar arquivos CSV (teste local)
     if args.bucket == "local":
         base_path = f"{args.prefix}/{args.dataset}/dt={args.date}/*.csv"
         files = glob.glob(base_path)
-    else:
+    else: # Arquivos do MinIO
         base_path = f"s3a://{args.bucket}/{args.prefix}/{args.dataset}/dt={args.date}/*.csv"
         files = _list_paths_with_glob(spark, base_path)
 
@@ -195,27 +164,22 @@ def main():
 
     print(f"Encontrados {len(files)} arquivo(s) para processar")
 
-    # 2. Ler Dimensões
+    # Ler Dimensões
     jdbc_opts = {
         "url": args.pg_url, "user": args.pg_user, "password": args.pg_password, "driver": "org.postgresql.Driver"
-    }
-    
-    # Broadcast das dimensões pequenas
-    dim_data = F.broadcast(get_jdbc_df(spark, "dimData", jdbc_opts))
-    
-    # Prepara dimHorario com string HH:MM:SS para join
+    }    
+    dim_data = F.broadcast(get_jdbc_df(spark, "dimData", jdbc_opts))    
     dim_horario = F.broadcast(
         get_jdbc_df(spark, "dimHorario", jdbc_opts) \
         .withColumn("tempo_str", F.format_string("%02d:%02d:%02d", F.col("hora"), F.col("minutos"), F.col("segundos")))
     )
-
     dim_municipio = F.broadcast(get_jdbc_df(spark, "dimMunicipio", jdbc_opts))
     # Cria coluna de join com 6 digitos
     dim_municipio = dim_municipio.withColumn("cod_mun_6", F.floor(F.col("codigo_ibge") / 10).cast("int"))
-
     dim_demografia = F.broadcast(get_jdbc_df(spark, "dimDemografia", jdbc_opts))
     dim_info_nasc = F.broadcast(get_jdbc_df(spark, "dimInfoNascimento", jdbc_opts))
 
+    
     # 3. Processar arquivos
     print("\n" + "="*60)
     print("INICIANDO PROCESSAMENTO DOS ARQUIVOS (SINASC)")
@@ -226,53 +190,34 @@ def main():
         
         # Leitura
         df_raw = spark.read.option("header", "true").option("sep", ";").option("inferSchema", "false").csv(file_path)
-        if df_raw.head(1) == 0: continue
-        
+        if df_raw.head(1) == 0: continue        
         # Transformação
         df_clean = transform_sinasc_raw(df_raw)
         df_clean = df_clean.repartition(2)
-
-        # ----------------------------------------
-        # JOINS COM DIMENSÕES
-        # ----------------------------------------
-
-        # 1. Data Nascimento
+        # Joins
         df_joined = df_clean.join(
             dim_data.select(F.col("data").alias("data_nascimento"), F.col("chave_data")),
             on="data_nascimento", how="left"
         )
-
-        # 2. Tempo Nascimento
         df_joined = df_joined.join(
             dim_horario.select("tempo_str", "chave_tempo"),
             df_joined.tempo_nascimento == F.col("tempo_str"),
             how="left"
         ).drop("tempo_str")
-
-        # 3. Municípios (Nascimento e Residência)
-        # Reutiliza o DF de municipio filtrado
         dim_mun_lookup = dim_municipio.select(F.col("cod_mun_6"), F.col("chave_municipio"))
-
-        # Mun Nascimento
         df_joined = df_joined.join(
             dim_mun_lookup.withColumnRenamed("chave_municipio", "chave_municipio_nascimento"),
             df_joined.cod_mun_nasc == F.col("cod_mun_6"),
             how="left"
         ).drop("cod_mun_6")
-
-        # Mun Residencia
         df_joined = df_joined.join(
             dim_mun_lookup.withColumnRenamed("chave_municipio", "chave_municipio_residencia"),
             df_joined.cod_mun_res == F.col("cod_mun_6"),
             how="left"
         ).drop("cod_mun_6")
-
-        # 4. Demografia (MÃE)
-        # O fato nascimento liga-se à demografia da MÃE. 
-        # Portanto, o sexo na dimensão deve ser 'F' e usamos os dados da mãe.
         df_joined = df_joined.join(
             dim_demografia.withColumnRenamed("sexo", "sexo_dim"),
-            (F.lit("F") == F.col("sexo_dim")) & # Força sexo feminino (Mãe)
+            (F.lit("F") == F.col("sexo_dim")) &
             (df_joined.raca_mae_desc == dim_demografia.raca) &
             (df_joined.estciv_mae_desc == dim_demografia.estado_civil) &
             (df_joined.esc_mae_desc == dim_demografia.escolaridade) &
@@ -286,8 +231,6 @@ def main():
             ),
             how="left"
         )
-
-        # 5. Info Nascimento (BEBÊ + GESTAÇÃO)
         df_joined = df_joined.join(
             dim_info_nasc.withColumnRenamed("sexo", "sexo_rn_dim"),
             (df_joined.sexo_rn_desc == F.col("sexo_rn_dim")) &
@@ -305,23 +248,14 @@ def main():
             ),
             how="left"
         )
-
-        # ----------------------------------------
-        # TRATAMENTO DE NULOS E AGREGAÇÃO
-        # ----------------------------------------
-        
-        # Preencher chaves nulas com 0 (Ignorado) ou manter NULL se preferir descartar
-        # Assumindo estratégia de não perder dados:
         fill_values = {
             "chave_municipio_nascimento": 0,
             "chave_municipio_residencia": 0,
-            "chave_demografia": 0, # Assumindo que existe ID 0 na dimensão (se script de população criar)
+            "chave_demografia": 0,
             "chave_info_nascimento": 0,
-            "chave_tempo": -1 # dimHorario tem -1 para nulo no init.sql
+            "chave_tempo": -1
         }
-        df_joined = df_joined.fillna(fill_values)
-        
-        # Remove registros onde a data é inválida (chave_data null) pois é PK
+        df_joined = df_joined.fillna(fill_values)        
         df_joined = df_joined.filter(F.col("chave_data").isNotNull())
 
         keys = [
@@ -333,14 +267,12 @@ def main():
             "chave_info_nascimento"
         ]
 
-        # Agregação
         df_agg = df_joined.groupBy(*keys).count().withColumnRenamed("count", "quantidade_nascimentos")
 
         # Escrita
         print(f"Escrevendo {df_agg.count()} registros na factNascimentos...")
         df_agg.write.format("jdbc").options(**jdbc_opts).option("dbtable", "factNascimentos").mode("append").save()
         
-        # Limpeza memória
         df_raw.unpersist()
         df_clean.unpersist()
 

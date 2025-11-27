@@ -10,11 +10,8 @@ from pyspark.sql import functions as F
 from pyspark.sql.types import StringType, IntegerType, StructType, StructField
 from pyspark.sql.window import Window
 
-# ==========================================
-# UTILITÁRIOS
-# ==========================================
-
 def _list_paths_with_glob(spark: SparkSession, glob_path: str) -> List[str]:
+    """Gera uma lista de caminhos dos arquivos a serem processados"""
     try:
         jvm = spark._jvm
         sc = spark.sparkContext
@@ -31,20 +28,15 @@ def get_jdbc_df(spark, table, opts):
     """Lê uma tabela do Postgres como DataFrame Spark."""
     return spark.read.format("jdbc").options(**opts).option("dbtable", table).load()
 
-# ==========================================
-# TRANSFORMAÇÃO E LIMPEZA
-# ==========================================
-
 def transform_sim_raw(df):
     """
-    Limpeza inicial e tipagem dos dados brutos do SIM.
-    Prepara os campos para os Joins com as dimensões.
+    Limpeza e enriquecimento dos dados do SIM.
     """
     # 1. Datas
     df = df.withColumn("data_obito", F.to_date(F.col("DTOBITO").cast("string"), "ddMMyyyy"))
     df = df.withColumn("data_nascimento", F.to_date(F.col("DTNASC").cast("string"), "ddMMyyyy"))
 
-    # 2. Hora (HH:MM:SS)
+    # 2. Hora (HH:MM:SS) - Transformar horarios inválidos em 00:00:00
     df = df.withColumn("hora_clean", F.lpad(F.col("HORAOBITO").cast("string"), 4, "0"))
     df = df.withColumn("tempo_obito", 
         F.when(
@@ -57,13 +49,11 @@ def transform_sim_raw(df):
             )
         )
     )
-
-    # 3. Mapeamentos Demográficos (Códigos -> Descrições das Dimensões)
     
     # Sexo
     df = df.withColumn("sexo_desc", 
-        F.when(F.col("SEXO") == "1", "Masculino")
-         .when(F.col("SEXO") == "2", "Feminino")
+        F.when((F.col("SEXO") == "1" | F.col("SEXO") == "M"), "Masculino")
+         .when((F.col("SEXO") == "2" | F.col("SEXO") == "F"), "Feminino")
          .otherwise("Ignorado")
     )
     
@@ -74,7 +64,7 @@ def transform_sim_raw(df):
          .when(F.col("RACACOR") == "3", "Amarela")
          .when(F.col("RACACOR") == "4", "Parda")
          .when(F.col("RACACOR") == "5", "Indígena")
-         .otherwise("Ignorado") # Dicionário não especifica outros, assume ignorado
+         .otherwise("Ignorado")
     )
 
     # Estado Civil
@@ -88,7 +78,6 @@ def transform_sim_raw(df):
     )
 
     # Escolaridade
-    # 1: Nenhuma, 2: 1 a 3 anos, 3: 4 a 7 anos, 4: 8 a 11 anos, 5: 12 e mais, 9: Ignorado
     df = df.withColumn("esc_desc",
         F.when(F.col("ESC") == "1", "Nenhuma")
          .when(F.col("ESC") == "2", "1 a 3 anos")
@@ -99,7 +88,9 @@ def transform_sim_raw(df):
     )
 
     # Idade Calculada (Anos)
-    # IDADE: 1 digito unidade + 2 digitos valor. 4=anos, 5=>100 anos.
+    # IDADE: quando primeiro dígito é menor que 4, idade = 0.
+    # Quando primeiro dígito é 4, idade = valor dos dois últimos dígitos.
+    # Quando primeiro dígito é 5, idade = valor dos dois últimos dígitos + 100.
     df = df.withColumn("id_unid", F.substring(F.lpad(F.col("IDADE"), 3, "0"), 1, 1).cast("int"))
     df = df.withColumn("id_val", F.substring(F.lpad(F.col("IDADE"), 3, "0"), 2, 2).cast("int"))
     
@@ -110,23 +101,20 @@ def transform_sim_raw(df):
          .otherwise(None)
     )
 
-    # Prepara CIDs para a Ponte (Limpeza básica)
-    # LINHAA a LINHAD e CAUSABAS são códigos únicos
+    # Causas de Óbito - Limpeza dos Códigos CID
+    # LINHAA, LINHAB, LINHAC, LINHAD: remover asteriscos e sufixo X
     for c in ["LINHAA", "LINHAB", "LINHAC", "LINHAD"]:
         df = df.withColumn(c, F.regexp_replace(F.col(c), "[^A-Z0-9]", ""))
         df = df.withColumn(c, F.regexp_replace(F.col(c), "X$", ""))
 
     # LINHAII pode conter múltiplos CIDs separados por * (ex: *I48X*N40X)
-    # 1. Manter apenas alfanuméricos e asteriscos
+    # Manter apenas alfanuméricos, separar por *, remover sufixo X e strings vazias
     df = df.withColumn("LINHAII_clean", F.regexp_replace(F.col("LINHAII"), "[^A-Z0-9*]", ""))
-    # 2. Splitar por *
     df = df.withColumn("LINHAII_arr", F.split(F.col("LINHAII_clean"), "\\*"))
-    # 3. Remover strings vazias do array e remover sufixo X de cada elemento
     df = df.withColumn("LINHAII_arr", F.expr("filter(LINHAII_arr, x -> x != '')"))
     df = df.withColumn("LINHAII_arr", F.expr("transform(LINHAII_arr, x -> regexp_replace(x, 'X$', ''))"))
 
-    # Conversão de Códigos para Join
-    # Tratamento especial para municípios: valores vazios/nulos devem resultar em null, não em 0
+    # Códigos IBGE e CBO
     df = df.withColumn("cod_mun_res", 
         F.when((F.col("CODMUNRES").isNull()) | (F.trim(F.col("CODMUNRES")) == ""), None)
          .otherwise(F.col("CODMUNRES").cast("int"))
@@ -139,10 +127,6 @@ def transform_sim_raw(df):
 
     return df
 
-# ==========================================
-# LÓGICA DE NEGÓCIO PRINCIPAL
-# ==========================================
-
 def process_bridge_table(df_sim, df_dim_causa, jdbc_opts, spark):
     """
     Gerencia a criação e recuperação de IDs para grupos de causas.
@@ -150,28 +134,18 @@ def process_bridge_table(df_sim, df_dim_causa, jdbc_opts, spark):
     """
     print("Processando Grupos de Causas...")
     
-    # 1. Recuperar a tabela ponte atual do banco
+    # Recuperar a tabela ponte atual do banco
     df_bridge_db = get_jdbc_df(spark, "ponteGrupoCausas", jdbc_opts)
     
-    # Criar um hash/assinatura para os grupos existentes
-    # Agrupa por chave_grupo e coleta lista ordenada de (ordem, chave_causa)
-    # Simplificação: Vamos assumir que a combinação de CIDs define o grupo.
-    
-    # 2. Transformar as colunas de CID do SIM em Array de CIDs
-    # Mapear CIDs (strings) para Chaves (inteiros) usando dimCausa
-    # Precisamos fazer lookup para LINHAA, LINHAB, etc.
-    
-    # Estratégia: Criar array unificado [A, B, C, D, II_1, II_2...] preservando posições
-    # IMPORTANTE: Não concatenar diretamente porque isso perde as posições originais quando há nulls
-    # Em vez disso, criar um array com estrutura (posição_original, código) para cada linha
+    # Criar um hash para os grupos existentes    
+    # Transformar as colunas de CID do SIM em Array de CIDs
+    # Mapear CIDs para Chaves da tabela dimCausa
     
     # Garantir que LINHAII_arr não seja null
     df_arrays = df_sim.select("row_id", "LINHAA", "LINHAB", "LINHAC", "LINHAD", "LINHAII_arr") \
         .withColumn("LINHAII_arr", F.coalesce(F.col("LINHAII_arr"), F.array()))
-    
-    # Criar arrays com estrutura (ordem, código) para cada linha
-    # LINHAA=ordem 1, LINHAB=ordem 2, LINHAC=ordem 3, LINHAD=ordem 4
-    # LINHAII elementos começam em ordem 5
+
+    # Criar uma coluna de structs com as causas e ordem
     df_arrays = df_arrays.withColumn(
         "all_causes",
         F.concat(
@@ -190,29 +164,20 @@ def process_bridge_table(df_sim, df_dim_causa, jdbc_opts, spark):
             F.col("causa_info.ordem").alias("ordem_causa"),
             F.col("causa_info.codigo").alias("cid_codigo")
         ).filter((F.col("cid_codigo").isNotNull()) & (F.col("cid_codigo") != ""))
-    
-    # Debug: mostrar exemplo de como as causas estão sendo processadas (sem ordenação para evitar uso de memória)
-    print("Exemplo de causas processadas (primeiros 20 registros):")
-    df_causes_stacked.show(20, truncate=False)
 
     # Join com dimCausa para pegar chave_causa
-    # Usar LEFT JOIN para não perder a posição (ordem) se o CID não for encontrado
-    # Se não achar, assume chave_causa = 0 (Ignorado/Não Encontrado)
+    # Usar LEFT JOIN para não perder a ordem se o CID não for encontrado
+    # Se não achar, assumir chave_causa = 0 (Ignorado/Não Encontrado)
     df_causes_mapped = df_causes_stacked.join(
         df_dim_causa.select(F.col("codigo_CID").alias("cid_codigo"), "chave_causa"),
         on="cid_codigo",
         how="left"
     ).fillna(0, subset=["chave_causa"])
-
-    # 3. Criar Assinatura do Grupo para cada Óbito (row_id)
-    # Assinatura: string concatenada "chave_causa:ordem|..."
-    # IMPORTANTE: Preservar a ordem das causas (A, B, C, D, II)
-    # A ordem indica a sequência de eventos que levaram ao óbito
     
     # Usar array_sort com struct para ordenar por ordem_causa antes de coletar
     # Reparticionar por row_id antes da agregação para distribuir melhor
     df_causes_mapped = df_causes_mapped.repartition(4, "row_id")
-    
+    # Agrupar por row_id, criar a hash de cada grupo e manter uma struct de causas
     df_groups = df_causes_mapped.withColumn(
         "item_sig", F.concat_ws(":", F.col("chave_causa"), F.col("ordem_causa"))
     ).withColumn(
@@ -225,16 +190,11 @@ def process_bridge_table(df_sim, df_dim_causa, jdbc_opts, spark):
         F.concat_ws("|", F.expr("transform(sig_sorted, x -> x.item_sig)")).alias("group_signature"),
         F.expr("transform(causes_sorted, x -> x.causa_struct)").alias("causes_list")
     )
-    
-    # Reparticionar após a agregação para distribuir os grupos
     df_groups = df_groups.repartition(4)
 
-    # 4. Ler Grupos Existentes e Criar suas Assinaturas
+    # Ler Grupos Existentes e Criar suas Assinaturas
     # Se a tabela estiver vazia, cria DF vazio
-    # Otimização: verificar via first() ao invés de count() para evitar OOM
     first_row = df_bridge_db.first()
-    print(f"Verificando grupos de causas existentes no banco...")
-    
     if first_row is None:
         df_existing_signatures = spark.createDataFrame([], schema=StructType([
             StructField("existing_group_id", IntegerType()), 
@@ -242,8 +202,6 @@ def process_bridge_table(df_sim, df_dim_causa, jdbc_opts, spark):
         ]))
         next_id = 1
     else:
-        # Recriar assinatura dos dados do banco para comparação
-        # Ordenar por ordem_causa para manter a sequência correta
         df_existing_signatures = df_bridge_db.withColumn(
             "item_sig", F.concat_ws(":", F.col("chave_causa"), F.col("ordem_causa"))
         ).groupBy("chave_grupo_causa").agg(
@@ -253,11 +211,10 @@ def process_bridge_table(df_sim, df_dim_causa, jdbc_opts, spark):
             F.concat_ws("|", F.expr("transform(sig_sorted, x -> x.item_sig)")).alias("group_signature")
         )
         
-        # Calcular próximo ID
         max_id_row = df_bridge_db.agg(F.max("chave_grupo_causa")).collect()[0][0]
         next_id = (max_id_row + 1) if max_id_row else 1
 
-    # 5. Cruzar Óbitos com Grupos Existentes
+    # Cruzar Óbitos com Grupos Existentes
     df_merged = df_groups.join(df_existing_signatures, on="group_signature", how="left")
 
     # Separar Novos Grupos
@@ -265,12 +222,10 @@ def process_bridge_table(df_sim, df_dim_causa, jdbc_opts, spark):
 
     # Se houver novos grupos, atribuir IDs
     if not df_new_groups.rdd.isEmpty():
-        w_new = Window.orderBy("group_signature") # Ordem determinística
+        w_new = Window.orderBy("group_signature")
         df_new_groups_ids = df_new_groups.withColumn("row_num", F.row_number().over(w_new)) \
             .withColumn("new_group_id", F.col("row_num") + F.lit(next_id - 1))
         
-        # Preparar dados para inserir na ponteGrupoCausas
-        # Explodir a lista de volta para linhas
         df_to_insert = df_new_groups_ids.select(
             F.col("new_group_id").alias("chave_grupo_causa"),
             F.explode("causes_list").alias("cause_struct")
@@ -284,7 +239,6 @@ def process_bridge_table(df_sim, df_dim_causa, jdbc_opts, spark):
         df_to_insert.write.format("jdbc").options(**jdbc_opts).option("dbtable", "ponteGrupoCausas").mode("append").save()
         print("Inserção concluída")
 
-        # Atualizar o mapeamento local para incluir os novos
         df_mapping_final = df_merged.join(
             df_new_groups_ids.select("group_signature", "new_group_id"),
             on="group_signature",
@@ -302,8 +256,9 @@ def process_bridge_table(df_sim, df_dim_causa, jdbc_opts, spark):
 
 
 def main():
+    # Argumentos de Linha de Comando
     p = argparse.ArgumentParser()
-    p.add_argument("--dataset", required=True) # Esperado 'sim'
+    p.add_argument("--dataset", required=True)
     p.add_argument("--date", required=True)
     p.add_argument("--bucket", default="landing")
     p.add_argument("--prefix", default="source_sus")
@@ -315,11 +270,11 @@ def main():
 
     spark = SparkSession.builder.appName("ETL_SIM_FactObitos").getOrCreate()
 
-    # 1. Listar arquivos CSV
+    # 1. Listar arquivos CSV (teste local)
     if args.bucket == "local":
         base_path = f"{args.prefix}/{args.dataset}/dt={args.date}/*.csv"
         files = glob.glob(base_path)
-    else:
+    else: # Arquivos do MinIO
         base_path = f"s3a://{args.bucket}/{args.prefix}/{args.dataset}/dt={args.date}/*.csv"
         files = _list_paths_with_glob(spark, base_path)
 
@@ -331,30 +286,24 @@ def main():
     for idx, file in enumerate(files, 1):
         print(f"  [{idx}] {file}")
 
-    # 2. Ler Dimensões (uma vez, antes do loop)
+    # Ler Dimensões (uma vez, antes do loop)
     jdbc_opts = {
         "url": args.pg_url, "user": args.pg_user, "password": args.pg_password, "driver": "org.postgresql.Driver"
     }
     
-    # Ler dimensões e fazer broadcast das menores para otimizar joins
-    # NÃO fazer cache de tudo - apenas broadcast das pequenas
-    dim_data = F.broadcast(get_jdbc_df(spark, "dimData", jdbc_opts))
-    
-    # Ler dimHorario e formatar tempo para string HH:MM:SS para garantir join correto
+    dim_data = F.broadcast(get_jdbc_df(spark, "dimData", jdbc_opts))    
     dim_horario = F.broadcast(
         get_jdbc_df(spark, "dimHorario", jdbc_opts) \
         .withColumn("tempo_str", F.format_string("%02d:%02d:%02d", F.col("hora"), F.col("minutos"), F.col("segundos")))
     )
-
     dim_municipio = F.broadcast(get_jdbc_df(spark, "dimMunicipio", jdbc_opts))
     # Criar coluna de 6 dígitos para join com CSV que usa 6 dígitos
     dim_municipio = dim_municipio.withColumn("cod_mun_6", F.floor(F.col("codigo_ibge") / 10).cast("int"))
-
     dim_ocupacao = F.broadcast(get_jdbc_df(spark, "dimOcupacao", jdbc_opts))
     dim_demografia = F.broadcast(get_jdbc_df(spark, "dimDemografia", jdbc_opts))
     dim_causa = F.broadcast(get_jdbc_df(spark, "dimCausa", jdbc_opts))
 
-    # 3. Processar cada arquivo individualmente
+    # Processar cada arquivo individualmente
     print("\n" + "="*60)
     print("INICIANDO PROCESSAMENTO DOS ARQUIVOS")
     print("="*60 + "\n")
@@ -367,42 +316,32 @@ def main():
         df_raw = spark.read.option("header", "true").option("sep", ";").option("inferSchema", "false").csv(file_path)
         print(f"Lendo arquivo...")
         
-        # Verificar se está vazio sem usar count()
         if df_raw.first() is None:
             print(f"Arquivo vazio, pulando...")
             continue
         
-        # Adicionar ID único temporário
         df_raw = df_raw.withColumn("row_id", F.monotonically_increasing_id())
         
-        # 3.2. Limpeza Inicial
         df_clean = transform_sim_raw(df_raw)
-        df_clean = df_clean.repartition(2)  # Menos partições para arquivos individuais
-        
-        # 3.3. Processar Grupos de Causas (Ponte)
+        df_clean = df_clean.repartition(2)
         df_with_causes = process_bridge_table(df_clean, dim_causa, jdbc_opts, spark)
-        
-        # 3.4. Lookups para outras Chaves (Joins)
         
         # Data Nascimento
         df_joined = df_with_causes.join(
             dim_data.select(F.col("data").alias("data_nascimento"), F.col("chave_data").alias("chave_data_nascimento")),
             on="data_nascimento", how="left"
-        )
-        
+        )        
         # Data Óbito
         df_joined = df_joined.join(
             dim_data.select(F.col("data").alias("data_obito"), F.col("chave_data").alias("chave_data_obito")),
             on="data_obito", how="left"
         )
-
-        # Tempo/Hora
+        # Hora
         df_joined = df_joined.join(
             dim_horario.select("tempo_str", "chave_tempo"),
             df_joined.tempo_obito == F.col("tempo_str"),
             how="left"
         ).withColumnRenamed("chave_tempo", "chave_tempo_obito").drop("tempo_str")
-
         # Municípios (Residencia e Ocorrencia)
         dim_mun_res = dim_municipio.select(
             F.col("cod_mun_6").alias("cod_mun_res"), 
@@ -411,20 +350,14 @@ def main():
         dim_mun_ocor = dim_municipio.select(
             F.col("cod_mun_6").alias("cod_mun_ocor"), 
             F.col("chave_municipio").alias("chave_municipio_obito")
-        )
-        
+        )        
         df_joined = df_joined.join(dim_mun_res, on="cod_mun_res", how="left")
         df_joined = df_joined.join(dim_mun_ocor, on="cod_mun_ocor", how="left")
-        
-        print("Joins com municípios completados")
-
         # Ocupação
         df_joined = df_joined.join(
             dim_ocupacao.select(F.col("cbo_2002").alias("ocupacao_cbo"), "chave_ocupacao"),
             on="ocupacao_cbo", how="left"
         )
-
-        # Demografia
         df_joined = df_joined.join(
             dim_demografia,
             (df_joined.sexo_desc == dim_demografia.descricao_sexo) &
@@ -438,8 +371,6 @@ def main():
             ),
             how="left"
         )
-        
-        # 3.5. Agregação Final
         keys = [
             "chave_data_nascimento",
             "chave_data_obito",
@@ -449,32 +380,22 @@ def main():
             "chave_demografia",
             "chave_grupo_causa",
             "chave_ocupacao"
-        ]
-        
+        ]        
         # Tratar NULLs antes de agrupar/inserir
-        # Município de residência: preencher com 0 se join falhou MAS código existia
         df_joined = df_joined.withColumn(
             "chave_municipio_residencia",
             F.when(F.col("chave_municipio_residencia").isNull() & F.col("cod_mun_res").isNotNull(), 0)
              .otherwise(F.col("chave_municipio_residencia"))
-        )
-        
-        # Município de ocorrência: preencher com 0 se join falhou MAS código existia
+        )        
         df_joined = df_joined.withColumn(
             "chave_municipio_obito",
             F.when(F.col("chave_municipio_obito").isNull() & F.col("cod_mun_ocor").isNotNull(), 0)
              .otherwise(F.col("chave_municipio_obito"))
         )
         
-        # Ocupação e grupo de causa: sempre preencher com 0 se null
         df_joined = df_joined.fillna(0, subset=["chave_ocupacao", "chave_grupo_causa"])
-        
-        # Reparticionar antes da agregação (reduzido para 2 partições para economizar memória)
-        df_joined = df_joined.repartition(2, *keys)
-        
-        df_agg = df_joined.groupBy(*keys).count().withColumnRenamed("count", "quantidade_obitos")
-        
-        # Filtra nulos restantes para evitar crash do job
+        df_joined = df_joined.repartition(2, *keys)        
+        df_agg = df_joined.groupBy(*keys).count().withColumnRenamed("count", "quantidade_obitos")        
         df_agg = df_agg.na.drop(subset=keys)
         
         print(f"\nEscrevendo registros agregados na factObitos...")
@@ -482,17 +403,13 @@ def main():
         
         print(f"✓ Arquivo {file_idx}/{len(files)} processado com sucesso!\n")
         
-        # Liberar memória explicitamente
         df_raw.unpersist()
         df_clean.unpersist()
         df_joined.unpersist()
         df_agg.unpersist()
-        
-        # Forçar garbage collection
         import gc
         gc.collect()
     
-    # Limpar cache das dimensões
     dim_data.unpersist()
     dim_municipio.unpersist()
     dim_horario.unpersist()
